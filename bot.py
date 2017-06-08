@@ -12,9 +12,15 @@ class Discord(discord.Client):
     # Add more code for init (declare vars)
     # Get info from configparser
     # Define class logger
+    self.channel = None
+    self.voiceChannel = None
+    self.logChannel = None
+    self.musicPlaylist = list()
 
   async def on_ready(self):
     # Initialize login and states
+    self.logger.info("Succesfully logged in as {name}".format(name=self.user.name))
+    
 
   async def on_message(self, message):
     # Parse message for commands
@@ -24,7 +30,7 @@ class Discord(discord.Client):
 
   def run(self):
     self.logger.info("Logging in")
-    super().run(token)
+    super().login(token)
 
 bot = Discord()
 bot.run()
