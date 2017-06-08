@@ -1,2 +1,3 @@
 # DiscordBotPWS
-Discord bot written using Discord.py.
+Discord bot geschreven in Python.
+Gemaakt als opdracht voor Het Amsterdams Lyceum als Profiel Werkstuk
