@@ -61,10 +61,10 @@ class Config:
       
       if not (self.email && self.password):
         if not self.email:
-          self.logger.critical("E-mail isn't configurated in the config!")
+          self.logger.critical("E-mail isn't configurated in the config")
         if not self.password:
-          self.logger.critical("Password isn't configurated in the config!")
-        self.logger.critical("Logging in won't work, requirements aren't met!")
+          self.logger.critical("Password isn't configurated in the config")
+        self.logger.critical("Logging in won't work, improper login credentials has been passed!")
     else:
       self.logger.info("Token usage is set to true")
       self.logger.info("Loading token")
@@ -72,8 +72,14 @@ class Config:
       self.token = config.get("Auth", "token", fallback=None)
       
       if not self.token:
-        self.logger.critical("Bot token isn't configurated in the config!")
-        self.logger.critical("Logging in won't work, requirements aren't met!")
+        self.logger.critical("Bot token isn't configurated in the config")
+        self.logger.critical("Logging in won't work, improper login credentials has been passed!")
+
+    # Load Google API
+    self.logger.info("Loading Google API token")
+    self.googleAPI = config.get("Administration", "googleAPI", fallback=None)
+    if not self.googleAPI:
+      self.logger.warning("Google API key isn't configured, some features will not work as intended")
 
     # Define channels we can use as bot
     self.textChannel = config.get("Administration", "textChannel", fallback=None)
@@ -85,11 +91,20 @@ class Config:
       # If someone improperly configurated voicechannel, take first as default
       self.voiceChannel = self.voiceChannel[0]
 
-    # Load Google API
-    self.logger.info("Loading Google API token")
-    self.googleAPI = config.get("Administration", "googleAPI", fallback=None)
-    if not self.googleAPI:
-      self.logger.warning("Google API key isn't configured, some features will not work as intended")
+    # Use by default not a custom prefix, if true, use the configured one
+    self.usePrefix = config.get("Administration", "usePrefix", fallback=False)
+    if not usePrefix:
+      self.logger.info("Prefix usage is set to false")
+      self.logger.info("Configuring bot mention as prefix on login")
+    else:
+      self.logger.info("Prefix usage is set to true")
+      self.logger.info("Loading prefix")
+      self.prefix = config.get("Administration", "prefix", fallback=None)
+      if not self.prefix:
+        self.logger.warning("Prefix isn't configured, configuring bot mention as prefix on login")
+        self.usePrefix = False
+      else:
+        self.logger.info("Prefix set to \"{prefix}\"".format(prefix=self.prefix))
 
     # Load a game which the bot seems to play
     self.gameName = config.get("Bot", "gameName", fallback=None)
@@ -97,9 +112,31 @@ class Config:
     self.gameType = config.get("Bot", "gameType", fallback=None)
     if self.gameName:
       if(self.gameUrl && (self.gameType == 1)):
-        self.logger.info("Loaded stream {name}".format(name=self.gameName))
+        self.logger.info("Loaded stream \"{name}\"".format(name=self.gameName))
       else:
-        self.logger.info("Loaded game {name}".format(name=self.gameName))
+        self.logger.info("Loaded game \"{name}\"".format(name=self.gameName))
+
+  def reset(self):
+    config = configparser.ConfigParser()
+
+    self.logger.warning("Resetting the config to default values")
+    # Set auth section up with no values
+    config.add_section("Auth")
+    config.set("Auth", "useToken", "")
+    config.set("Auth", "email", "")
+    config.set("Auth", "password, "")
+    config.set("Auth", "token", "")
+
+    config.set("Administration", "googleAPI", "")
+    config.set("Administration", "textChannel", "")
+    config.set("Administration", "voiceChannel", "")
+    config.set("Administration", "usePrefix", "false")
+    config.set("Administration", "prefix", "")
+
+    config.set("Bot", "gameName", "")
+    config.set("Bot", "gameUrl", "")
+    config.set("Bot", "gameType", "")
+
 
 bot = Discord()
 bot.run()
