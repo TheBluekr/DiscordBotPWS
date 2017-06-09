@@ -1,6 +1,6 @@
 import configparser
 
-class Configparser()
+class Config:
   def __init__(self):
     # Declare default for now
     self.config = configparser.Configparser()
@@ -12,3 +12,6 @@ class Configparser()
     self.channel = None
     self.voiceChannel = None
     self.logChannel = None
+
+  def default(self):
+    
