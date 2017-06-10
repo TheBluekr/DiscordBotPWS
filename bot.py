@@ -1,4 +1,10 @@
-version = "0.0.1a"
+version = "0.0.1b"
+
+# ToDo:
+# Fix change_presence at on_ready
+# Begin setting up on_message event
+# Add basic commands
+# Define setup event when joining server
 
 import discord
 import logging
@@ -81,6 +87,9 @@ class MusicBot(discord.Client):
         # Process voicestate updates from clients connected to voicechannel
         pass
 
+    async def on_server_join(self, server):
+        pass
+
     def run(self):
         self.logger.info("Logging in")
         # No comment needed to explain this
@@ -88,12 +97,12 @@ class MusicBot(discord.Client):
             if(self.userToken == ""):
                 self.logger.critical("Token isn't defined, aborting")
                 return
-            super().login(self.userToken)
+            super().run(self.userToken)
         else:
             if((self.userName == "") or (self.userPassword == "")):
                 self.logger.critical("Login credentials aren't defined, aborting")
                 return
-            super().login(self.userName,self.userPassword)
+            super().run(self.userName,self.userPassword)
 
 class Config:
     def __init__(self, file):
@@ -112,13 +121,21 @@ class Config:
         
         # Parse all vars
         self.useToken = config.getboolean("Auth", "useToken", fallback=True)
+        if self.useToken == "":
+            # Add fallback to True if it's undefined
+            self.useToken = True
 
         if not self.useToken:
             self.logger.info("Token usage is set to false")
             self.logger.info("Loading e-mail and password")
 
             self.email = config.get("Auth", "email", fallback=None)
+            # Fallback to None if it's empty, configparser doesn't support None
+            if self.email == "":
+                self.email = None
             self.password = config.get("Auth", "password", fallback=None)
+            if self.password == "":
+                self.password = None
 
             if not (self.email and self.password):
                 if not self.email:
@@ -131,6 +148,8 @@ class Config:
             self.logger.info("Loading token")
 
             self.token = config.get("Auth", "token", fallback=None)
+            if self.token == "":
+                self.token = None
             if not self.token:
                 self.logger.critical("Bot token isn't configurated in the config")
                 self.logger.critical("Logging in won't work, improper login credentials has been passed!")
@@ -138,15 +157,21 @@ class Config:
         # Load Google API
         self.logger.info("Loading Google API token")
         self.googleAPI = config.get("Administration", "googleAPI", fallback=None)
+        if self.googleAPI == "":
+            self.googleAPI = None
         if not self.googleAPI:
            self.logger.warning("Google API key isn't configured, some features will not work as intended")
 
         # Define channels we can use as bot
         self.textChannel = config.get("Administration", "textChannel", fallback=None)
+        if self.textChannel == "":
+            self.textChannel = None
         if self.textChannel:
             self.textChannel = self.textChannel.split(",")
 
         self.voiceChannel = config.get("Administration", "voiceChannel", fallback=None)
+        if self.voiceChannel == "":
+            self.voiceChannel = None
         if self.voiceChannel:
             self.voiceChannel = self.voiceChannel.split(",")
             # If someone improperly configurated voicechannel, take first as default
@@ -155,6 +180,8 @@ class Config:
 
        # Use by default not a custom prefix, if true, use the configured one
         self.usePrefix = config.get("Administration", "usePrefix", fallback=False)
+        if self.usePrefix == "":
+            self.usePrefix = None
         if not self.usePrefix:
             self.logger.info("Prefix usage is set to false")
             self.logger.info("Configuring bot mention as prefix on login")
@@ -172,7 +199,11 @@ class Config:
         self.gameName = config.get("Bot", "gameName", fallback=None)
         self.gameUrl = config.get("Bot", "gameUrl", fallback=None)
         self.gameType = config.get("Bot", "gameType", fallback=None)
+        if self.gameName == "":
+            self.gameName = None
         if self.gameName:
+            if self.gameUrl == "":
+                self.gameUrl = None
             if(self.gameUrl and (self.gameType == 1)):
                 self.logger.info("Loaded stream \"{name}\"".format(name=self.gameName))
             else:
@@ -182,7 +213,7 @@ class Config:
         config = configparser.ConfigParser()
 
         self.logger.warning("Resetting the config to default values")
-        # Set auth section up with no values
+        # Set auth section up with no values (done)
         config.add_section("Auth")
         config.set("Auth", "useToken", "true")
         config.set("Auth", "email", "")
@@ -199,10 +230,33 @@ class Config:
         config.add_section("Bot")
         config.set("Bot", "gameName", "")
         config.set("Bot", "gameUrl", "")
-        config.set("Bot", "gameType", "")
+        config.set("Bot", "gameType", "0")
 
         with open(self.file, "w", encoding="utf-8") as file:
             config.write(file)
+
+    def update(self):
+        config = configparser.ConfigParser()
+
+        self.logger.info("Updating info in config")
+        # Update info from the class values in config in case we changed during the usage
+        config.add_section("Auth")
+        config.set("Auth", "useToken", self.useToken)
+        config.set("Auth", "email", self.email)
+        config.set("Auth", "password", self.password)
+        config.set("Auth", "token", self.token)
+
+        config.add_section("Administration")
+        config.set("Administration", "googleAPI", self.googleAPI)
+        config.set("Administration", "textChannel", self.textChannel)
+        config.set("Administration", "voiceChannel", self.voiceChannel)
+        config.set("Administration", "usePrefix", self.usePrefix)
+        config.set("Administration", "prefix", self.prefix)
+
+        config.add_section("Bot")
+        config.set("Bot", "gameName", self.gameName)
+        config.set("Bot", "gameUrl", self.gameUrl)
+        config.set("Bot", "gameType", self.gameType)
 
 
 bot = MusicBot()
