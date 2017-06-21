@@ -45,13 +45,6 @@ class MusicBot(discord.Client):
 
         self.fConfig = os.path.join("./settings", "config.cfg")
 
-        # Server related setup
-        self.channel = None
-        self.voiceChannel = None
-        self.logChannel = None
-        self.server = None
-        self.musicPlaylist = list()
-
         self.version = version
 
         self.config = Config(self.fConfig)
@@ -74,10 +67,36 @@ class MusicBot(discord.Client):
             self.prefix = self.config.prefix
             self.flagUsePrefix = True
 
+        # Server related setup
+        self.textChannelId = self.config.textChannel
+        self.textChannel = None
+        self.voiceChannelId = self.config.voiceChannel
+        self.voiceChannel = None
+        self.logChannelId = None
+        self.logChannel = None
+        self.serverId = None
+        self.musicPlaylist = list()
+
+        self.gameName = self.config.gameName
+        self.gameUrl = self.config.gameUrl
+        self.gameType = self.config.gameType
+
+        self.game = discord.Game()
+        self.game.name = self.gameName
+        self.game.url = self.gameUrl
+        self.game.type = self.gameType
+
     async def on_ready(self):
         # Initialize login and states
         self.logger.info("Succesfully logged in as {name}".format(name=self.user.name))
 
+        # We defined the discord.Game() class at the begin as self.game
+        if(self.gameUrl and (self.gameType == 1)):
+            self.logger.info("Started streaming {name}".format(name=self.gameName))
+            await self.change_presence(game=self.game)
+        else:
+            self.logger.info("Started playing {name}".format(name=self.gameName))
+            await self.change_presence(game=self.game)
 
     async def on_message(self, message):
         # Parse message for commands
