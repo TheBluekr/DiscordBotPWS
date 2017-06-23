@@ -1,16 +1,19 @@
 version = "0.0.1b"
 
 # ToDo:
-# Fix change_presence at on_ready
+# Fix change_presence at on_ready (done?)
 # Begin setting up on_message event
 # Add basic commands
 # Define setup event when joining server
+# Take current create_ytdl_player function from discord.py and use it on local level
+# Prepare for future rewrite
 
 import discord
 import logging
 import os
 import configparser
 import datetime
+import urllib.parse
 
 # Define root logger
 rootLogger = logging.getLogger()
@@ -122,6 +125,19 @@ class MusicBot(discord.Client):
                 self.logger.critical("Login credentials aren't defined, aborting")
                 return
             super().run(self.userName,self.userPassword)
+
+class Youtube:
+    def __init__(self):
+        pass # Do we need this?
+
+    def parse(self, url):
+        # Use this if we get a https://www.youtube.com/ link
+        url_data = urllib.parse.urlparse(url)
+        data = urllib.parse.parse_qs(url_data.query)
+        if "list" in data:
+            return {"url":data["list"][0],"typeUrl":"list"}
+        else:
+            return {"url":data["v"][0],"typeUrl":"v"}
 
 class Config:
     def __init__(self, file):
