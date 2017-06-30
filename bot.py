@@ -66,7 +66,7 @@ class MusicBot(discord.Client):
             self.prefix = None
             self.flagUsePrefix = False
         else:
-            self.logger.info("usePrefix set as true in config, loading")
+            self.logger.info("usePrefix set as true in config, loaded {name} as prefix".format(name=self.config.prefix))
             self.prefix = self.config.prefix
             self.flagUsePrefix = True
 
@@ -80,30 +80,31 @@ class MusicBot(discord.Client):
         self.serverId = None
         self.musicPlaylist = list()
 
-        self.gameName = self.config.gameName
-        self.gameUrl = self.config.gameUrl
-        self.gameType = self.config.gameType
-
         self.game = discord.Game()
-        self.game.name = self.gameName
-        self.game.url = self.gameUrl
-        self.game.type = self.gameType
+        self.game.name = self.config.gameName
+        self.game.url = self.config.gameUrl
+        self.game.type = self.config.gameType
+        
+        self.youtube = Youtube.__init__(self.config.googleAPI)
 
     async def on_ready(self):
         # Initialize login and states
         self.logger.info("Succesfully logged in as {name}".format(name=self.user.name))
 
         # We defined the discord.Game() class at the begin as self.game
-        if(self.gameUrl and (self.gameType == 1)):
-            self.logger.info("Started streaming {name}".format(name=self.gameName))
+        if(self.game.url and (self.game.type == 1)):
+            self.logger.info("Started streaming {name}".format(name=self.game.name))
             await self.change_presence(game=self.game)
         else:
-            self.logger.info("Started playing {name}".format(name=self.gameName))
+            self.logger.info("Started playing {name}".format(name=self.game.name))
             await self.change_presence(game=self.game)
 
     async def on_message(self, message):
-        # Parse message for commands
-        pass
+        # First check if it's us being tagged or correct prefix is being used
+        if((self.usePrefix == False) and (message.raw_mentions[0] != self.user.id)):
+            return
+        if((self.usePrefix == True) and (not message.content.startswith(self.prefix)):
+            return
 
     async def on_voice_state_update(self, memberBefore, memberAfter):
         # Process voicestate updates from clients connected to voicechannel
@@ -116,19 +117,25 @@ class MusicBot(discord.Client):
         self.logger.info("Logging in")
         # No comment needed to explain this
         if(self.flagUseToken):
-            if(self.userToken == ""):
+            if(self.userToken == None):
                 self.logger.critical("Token isn't defined, aborting")
                 return
             super().run(self.userToken)
         else:
-            if((self.userName == "") or (self.userPassword == "")):
+            if((self.userName == None) or (self.userPassword == None)):
                 self.logger.critical("Login credentials aren't defined, aborting")
                 return
             super().run(self.userName,self.userPassword)
 
 class Youtube:
-    def __init__(self):
-        pass # Do we need this?
+    def __init__(self, key):
+        self.key = key
+        
+    def getList(self, list):
+        pass
+    
+    def getVideo(self, video):
+        pass
 
     def parse(self, url):
         # Use this if we get a https://www.youtube.com/ link
