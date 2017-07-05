@@ -3,6 +3,7 @@ version = "0.0.1b"
 # ToDo:
 # Fix change_presence at on_ready (done?)
 # Begin setting up on_message event
+#     Add exceptionMessage() to get custom error messages for both console and discord
 # Add basic commands
 # Define setup event when joining server
 # Take current create_ytdl_player function from discord.py and use it on local level
@@ -14,6 +15,7 @@ import os
 import configparser
 import datetime
 import urllib.parse
+import traceback
 
 # Define root logger
 rootLogger = logging.getLogger()
@@ -85,7 +87,7 @@ class MusicBot(discord.Client):
         self.game.url = self.config.gameUrl
         self.game.type = self.config.gameType
         
-        self.youtube = Youtube.__init__(self.config.googleAPI)
+        self.youtube = Youtube(self.config.googleAPI)
 
     async def on_ready(self):
         # Initialize login and states
@@ -101,10 +103,49 @@ class MusicBot(discord.Client):
 
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
-        if((self.usePrefix == False) and (message.raw_mentions[0] != self.user.id)):
+        if(self.flagUsePrefix == False):
+            # Prevent issues, if this is smaller than 0 (wat?), Houston, we got a problem
+            if(len(message.raw_mentions) == 0):
+                return
+            if(message.raw_mentions[0] != self.user.id):
+                return
+        elif((self.flagUsePrefix == True) and (self.prefix != None)):
+            if(not message.content.startswith(self.prefix)):
+                return
+        else:
+            # If neither of these match, we propably did something wrong in the config
+            self.logger.critical("The prefix isn't configured correctly! Aborting")
             return
-        if((self.usePrefix == True) and (not message.content.startswith(self.prefix)):
+
+        # Remove first prefix or mention we checked
+        try:
+            content = message.content.split(' ', 1)[1]
+        except IndexError:
             return
+            # In case we only mention the bot or use a prefix it can create exceptions
+
+        # We want to make sure there's something after the add, it can't be empty right?
+        if content.startswith("add"):
+            if content == "add":
+                format = exceptionMessage("add")
+                await self.send_message(message.channel, format)
+                return
+
+            content = content.replace("add ", "", 1)
+            self.logger.info("Received link: \"{link}\", parsing".format(link=content))
+
+        if content.startswith("eval"):
+            if content == "eval":
+                format = exceptionMessage("eval")
+                await self.send_message(message.channel, format)
+                return
+
+            content = content.replace("eval ", "", 1)
+            try:
+                output = eval(content)
+                await self.send_message(message.channel, "```{output}```".format(output=output))
+            except:
+                await self.send_message(message.channel, "```{error}```".format(error=traceback.format_exc()))
 
     async def on_voice_state_update(self, memberBefore, memberAfter):
         # Process voicestate updates from clients connected to voicechannel
@@ -128,7 +169,7 @@ class MusicBot(discord.Client):
             super().run(self.userName,self.userPassword)
 
 class Youtube:
-    def __init__(self, key):
+    def __init__(self, key=None):
         self.key = key
         
     def getList(self, list):
@@ -300,6 +341,12 @@ class Config:
         config.set("Bot", "gameUrl", self.gameUrl)
         config.set("Bot", "gameType", self.gameType)
 
+class Embed:
+    def __init__(self):
+        pass
+
+    def embed(self, author=None, title=None, url=None, **kwargs):
+        pass
 
 bot = MusicBot()
 bot.run()
