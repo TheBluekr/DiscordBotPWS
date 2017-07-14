@@ -109,7 +109,7 @@ class MusicBot(discord.Client):
             self.logger.info("Started playing {name}".format(name=self.game.name))
             await self.change_presence(game=self.game)
         
-        self.formatPrefix = self.user if self.flagUsePrefix else self.prefix
+        self.formatPrefix = self.user if not self.flagUsePrefix else self.prefix
         self.logger.info("Prefix set as \"{prefix}\"".format(prefix=self.formatPrefix))
 
     async def on_message(self, message):
