@@ -17,6 +17,11 @@ import datetime
 import urllib.parse
 import traceback
 
+# Declare global vars
+
+# Error message formats
+formatErrorSyntax = "Syntax error, correct usage: {format}"
+
 # Define root logger
 rootLogger = logging.getLogger()
 rootLogger.setLevel(logging.INFO)
@@ -72,6 +77,9 @@ class MusicBot(discord.Client):
             self.prefix = self.config.prefix
             self.flagUsePrefix = True
 
+        # Store this for later usage when returning usage messages
+        self.formatPrefix = None
+
         # Server related setup
         self.textChannelId = self.config.textChannel
         self.textChannel = None
@@ -88,8 +96,6 @@ class MusicBot(discord.Client):
         self.game.type = self.config.gameType
         
         self.youtube = Youtube(self.config.googleAPI)
-        
-        self.prefixErrorCount = 0
 
     async def on_ready(self):
         # Initialize login and states
@@ -102,6 +108,9 @@ class MusicBot(discord.Client):
         else:
             self.logger.info("Started playing {name}".format(name=self.game.name))
             await self.change_presence(game=self.game)
+        
+        self.formatPrefix = self.user if self.flagUsePrefix else self.prefix
+        self.logger.info("Prefix set as \"{prefix}\"".format(prefix=self.formatPrefix))
 
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
@@ -133,8 +142,8 @@ class MusicBot(discord.Client):
         # We want to make sure there's something after the add, it can't be empty right?
         if content.startswith("add"):
             if content.strip() == "add":
-                format = exceptionMessage("add")
-                await self.send_message(message.channel, format)
+                self.logger.error("No arguments were passed after \"add\", aborting")
+                await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} add <URL / id>\"```".format(prefix=self.formatPrefix)))
                 return
 
             content = content.replace("add ", "", 1)
@@ -142,8 +151,8 @@ class MusicBot(discord.Client):
 
         if content.startswith("eval"):
             if content.strip() == "eval":
-                format = exceptionMessage("eval")
-                await self.send_message(message.channel, format)
+                self.logger.error("No arguments were passed after \"eval\", aborting")
+                await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} eval <value>\"```".format(prefix=self.formatPrefix)))
                 return
 
             content = content.replace("eval ", "", 1)
@@ -151,6 +160,7 @@ class MusicBot(discord.Client):
                 output = eval(content)
                 await self.send_message(message.channel, "```{output}```".format(output=output))
             except:
+                self.logger.error(traceback.format_exc())
                 await self.send_message(message.channel, "```{error}```".format(error=traceback.format_exc()))
 
     async def on_voice_state_update(self, memberBefore, memberAfter):
