@@ -88,6 +88,8 @@ class MusicBot(discord.Client):
         self.game.type = self.config.gameType
         
         self.youtube = Youtube(self.config.googleAPI)
+        
+        self.prefixErrorCount = 0
 
     async def on_ready(self):
         # Initialize login and states
@@ -104,9 +106,10 @@ class MusicBot(discord.Client):
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
         if(self.flagUsePrefix == False):
-            # Prevent issues, if this is smaller than 0 (wat?), Houston, we got a problem
+            # Prevent issues, if this is smaller than 0 (wat?). Houston, we got a problem
             if(len(message.raw_mentions) == 0):
                 return
+            # It wasn't us who got tagged first, just ignore it I guess
             if(message.raw_mentions[0] != self.user.id):
                 return
         elif((self.flagUsePrefix == True) and (self.prefix != None)):
@@ -114,7 +117,10 @@ class MusicBot(discord.Client):
                 return
         else:
             # If neither of these match, we propably did something wrong in the config
-            self.logger.critical("The prefix isn't configured correctly! Aborting")
+            self.logger.critical("The prefix isn't configured correctly! Updating config to default mention")
+            self.config.usePrefix = False
+            self.flagUsePrefix = False
+            self.config.update()
             return
 
         # Remove first prefix or mention we checked
@@ -126,7 +132,7 @@ class MusicBot(discord.Client):
 
         # We want to make sure there's something after the add, it can't be empty right?
         if content.startswith("add"):
-            if content == "add":
+            if content.strip() == "add":
                 format = exceptionMessage("add")
                 await self.send_message(message.channel, format)
                 return
@@ -135,7 +141,7 @@ class MusicBot(discord.Client):
             self.logger.info("Received link: \"{link}\", parsing".format(link=content))
 
         if content.startswith("eval"):
-            if content == "eval":
+            if content.strip() == "eval":
                 format = exceptionMessage("eval")
                 await self.send_message(message.channel, format)
                 return
