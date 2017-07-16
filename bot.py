@@ -17,6 +17,11 @@ import datetime
 import urllib.parse
 import traceback
 
+# Declare global vars
+
+# Error message formats
+formatErrorSyntax = "Syntax error, correct usage: {format}"
+
 # Define root logger
 rootLogger = logging.getLogger()
 rootLogger.setLevel(logging.INFO)
@@ -72,6 +77,9 @@ class MusicBot(discord.Client):
             self.prefix = self.config.prefix
             self.flagUsePrefix = True
 
+        # Store this for later usage when returning usage messages
+        self.formatPrefix = None
+
         # Server related setup
         self.textChannelId = self.config.textChannel
         self.textChannel = None
@@ -100,13 +108,17 @@ class MusicBot(discord.Client):
         else:
             self.logger.info("Started playing {name}".format(name=self.game.name))
             await self.change_presence(game=self.game)
+        
+        self.formatPrefix = self.user if not self.flagUsePrefix else self.prefix
+        self.logger.info("Prefix set as \"{prefix}\"".format(prefix=self.formatPrefix))
 
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
         if(self.flagUsePrefix == False):
-            # Prevent issues, if this is smaller than 0 (wat?), Houston, we got a problem
+            # Prevent issues, if this is smaller than 0 (wat?). Houston, we got a problem
             if(len(message.raw_mentions) == 0):
                 return
+            # It wasn't us who got tagged first, just ignore it I guess
             if(message.raw_mentions[0] != self.user.id):
                 return
         elif((self.flagUsePrefix == True) and (self.prefix != None)):
@@ -114,7 +126,10 @@ class MusicBot(discord.Client):
                 return
         else:
             # If neither of these match, we propably did something wrong in the config
-            self.logger.critical("The prefix isn't configured correctly! Aborting")
+            self.logger.critical("The prefix isn't configured correctly! Updating config to default mention")
+            self.config.usePrefix = False
+            self.flagUsePrefix = False
+            self.config.update()
             return
 
         # Remove first prefix or mention we checked
@@ -126,18 +141,18 @@ class MusicBot(discord.Client):
 
         # We want to make sure there's something after the add, it can't be empty right?
         if content.startswith("add"):
-            if content == "add":
-                format = exceptionMessage("add")
-                await self.send_message(message.channel, format)
+            if content.strip() == "add":
+                self.logger.error("No arguments were passed after \"add\", aborting")
+                await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} add <URL / id>\"```".format(prefix=self.formatPrefix)))
                 return
 
             content = content.replace("add ", "", 1)
             self.logger.info("Received link: \"{link}\", parsing".format(link=content))
 
         if content.startswith("eval"):
-            if content == "eval":
-                format = exceptionMessage("eval")
-                await self.send_message(message.channel, format)
+            if content.strip() == "eval":
+                self.logger.error("No arguments were passed after \"eval\", aborting")
+                await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} eval <value>\"```".format(prefix=self.formatPrefix)))
                 return
 
             content = content.replace("eval ", "", 1)
@@ -145,6 +160,7 @@ class MusicBot(discord.Client):
                 output = eval(content)
                 await self.send_message(message.channel, "```{output}```".format(output=output))
             except:
+                self.logger.error(traceback.format_exc())
                 await self.send_message(message.channel, "```{error}```".format(error=traceback.format_exc()))
 
         if(content.startswith("exit") or content.startswith("shutdown")):
