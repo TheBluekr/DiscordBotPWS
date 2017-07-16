@@ -39,6 +39,9 @@ fileHandler.setFormatter(formatter)
 fileHandler.setLevel(logging.DEBUG)
 rootLogger.addHandler(fileHandler)
 
+discordLogger = logging.getLogger('discord')
+discordLogger.setLevel(logging.WARNING)
+
 class MusicBot(discord.Client):
     # Init discord.Client() from discord.py
     def __init__(self):
@@ -51,7 +54,7 @@ class MusicBot(discord.Client):
 
         if not os.path.exists("./settings"):
             os.mkdir("./settings")
-            self.logger.warning("Settings folder was missing, created it")
+            self.logger.warning("Settings folder was missing, creating it")
 
         self.fConfig = os.path.join("./settings", "config.cfg")
 
@@ -69,11 +72,11 @@ class MusicBot(discord.Client):
             self.userPassword = self.config.password
 
         if not self.config.usePrefix:
-            self.logger.info("usePrefix set as false in config, using defaults")
+            self.logger.info("usePrefix set to false in config, using defaults")
             self.prefix = None
             self.flagUsePrefix = False
         else:
-            self.logger.info("usePrefix set as true in config, loaded {name} as prefix".format(name=self.config.prefix))
+            self.logger.info("usePrefix set to true in config, loaded {name} as prefix".format(name=self.config.prefix))
             self.prefix = self.config.prefix
             self.flagUsePrefix = True
 
@@ -110,7 +113,7 @@ class MusicBot(discord.Client):
             await self.change_presence(game=self.game)
         
         self.formatPrefix = self.user if not self.flagUsePrefix else self.prefix
-        self.logger.info("Prefix set as \"{prefix}\"".format(prefix=self.formatPrefix))
+        self.logger.info("Prefix set to \"{prefix}\"".format(prefix=self.formatPrefix))
 
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
@@ -217,25 +220,29 @@ class Config:
         if not os.path.exists(self.file):
             self.reset()
 
+        # In case we find an exception, add this to the counter
+        self.errors = 0
+
         # Read the config for vars
         config = configparser.ConfigParser()
         config.read(self.file, encoding="utf-8")
         
         # Parse all vars
         self.useToken = config.getboolean("Auth", "useToken", fallback=True)
-        if self.useToken == "":
-            # Add fallback to True if it's undefined
-            self.useToken = True
+
+        # Load them early to prevent exceptions when updating
+        self.token = config.get("Auth", "token", fallback=None)
+        self.email = config.get("Auth", "email", fallback=None)
+        self.password = config.get("Auth", "password", fallback=None)
 
         if not self.useToken:
             self.logger.info("Token usage is set to false")
             self.logger.info("Loading e-mail and password")
 
-            self.email = config.get("Auth", "email", fallback=None)
             # Fallback to None if it's empty, configparser doesn't support None
             if self.email == "":
                 self.email = None
-            self.password = config.get("Auth", "password", fallback=None)
+            
             if self.password == "":
                 self.password = None
 
@@ -249,9 +256,8 @@ class Config:
             self.logger.info("Token usage is set to true")
             self.logger.info("Loading token")
 
-            self.token = config.get("Auth", "token", fallback=None)
             if self.token == "":
-                self.token = None
+                self.token = False
             if not self.token:
                 self.logger.critical("Bot token isn't configurated in the config")
                 self.logger.critical("Logging in won't work, improper login credentials has been passed!")
@@ -282,7 +288,8 @@ class Config:
             else:
                 self.logger.info("Loaded {amount} mod".format(amount=len(self.mod)))
         else:
-            self.logger.warning("An monderator isn't configured, access is available to admin only")
+            if self.admin:
+                self.logger.warning("An moderator isn't configured, access is available to admin only")
 
         # Load Google API
         self.logger.info("Loading Google API token")
@@ -309,16 +316,17 @@ class Config:
                 self.voiceChannel = self.voiceChannel[0]
 
        # Use by default not a custom prefix, if true, use the configured one
-        self.usePrefix = config.get("Administration", "usePrefix", fallback=False)
+        self.usePrefix = config.getboolean("Administration", "usePrefix", fallback=False)
+        self.prefix = config.get("Administration", "prefix", fallback=None)
+
         if self.usePrefix == "":
-            self.usePrefix = None
+            self.usePrefix = False
         if not self.usePrefix:
             self.logger.info("Prefix usage is set to false")
             self.logger.info("Configuring bot mention as prefix on login")
         else:
             self.logger.info("Prefix usage is set to true")
             self.logger.info("Loading prefix")
-            self.prefix = config.get("Administration", "prefix", fallback=None)
             if not self.prefix:
                 self.logger.warning("Prefix isn't configured, configuring bot mention as prefix on login")
                 self.usePrefix = False
@@ -339,21 +347,25 @@ class Config:
             else:
                 self.logger.info("Loaded game \"{name}\"".format(name=self.gameName))
 
+        # Just make sure the config isn't missing any sections
+        Config.update(self)
+
     def reset(self):
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(allow_no_value=True)
 
         self.logger.warning("Resetting the config to default values")
         # Set auth section up with no values (done)
         config.add_section("Auth")
-        config.set("Auth", "useToken", "true")
+        config.set("Auth", "useToken", "false")
+        config.set("Auth", "token", "")
         config.set("Auth", "email", "")
         config.set("Auth", "password", "")
-        config.set("Auth", "token", "")
 
         config.add_section("Administration")
+        config.set("Administration", "Split admins/mods using \",\" don't use spaces. To grant access use the id of the user you wish to add.")
         config.set("Administration", "Administrator", "")
         config.set("Administration", "Moderator", "")
-        config.set("Administration", "", "")
+        config.set("Administration", "")
         config.set("Administration", "googleAPI", "")
         config.set("Administration", "textChannel", "")
         config.set("Administration", "voiceChannel", "")
@@ -361,38 +373,35 @@ class Config:
         config.set("Administration", "prefix", "")
 
         config.add_section("Bot")
-        config.set("Bot", "gameName", "")
-        config.set("Bot", "gameUrl", "")
-        config.set("Bot", "gameType", "0")
-
-        with open(self.file, "w", encoding="utf-8") as file:
-            config.write(file)
+        config.set("Bot", "gameName", self.gameName) if self.gameName else config.set("Bot", "gameName", "")
+        config.set("Bot", "gameUrl", self.gameUrl) if self.gameUrl else config.set("Bot", "gameUrl", "https://wwww.twitch.tv/logout")
+        config.set("Bot", "gameType", self.gameType) if self.gameType else config.set("Bot", "gameType", "0")
 
     def update(self):
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(allow_no_value=True)
 
-        self.logger.info("Updating info in config")
-        # Update info from the class values in config in case we changed during the usage
+        # Update info from the class values in config in case we changed during the usage or if things were missing from boot
         config.add_section("Auth")
-        config.set("Auth", "useToken", self.useToken)
-        config.set("Auth", "email", self.email)
-        config.set("Auth", "password", self.password)
-        config.set("Auth", "token", self.token)
+        config.set("Auth", "useToken", "true") if self.useToken == True else config.set("Auth", "useToken", "false")
+        config.set("Auth", "token", self.token) if self.token else config.set("Auth", "token", "")
+        config.set("Auth", "email", self.email) if self.email else config.set("Auth", "email", "")
+        config.set("Auth", "password", self.password) if self.password else config.set("Auth", "password", "")
 
         config.add_section("Administration")
-        config.set("Administration", "Administrator", self.admin)
-        config.set("Administration", "Moderator", self.mod)
-        config.set("Administration", "", "")
-        config.set("Administration", "googleAPI", self.googleAPI)
-        config.set("Administration", "textChannel", self.textChannel)
-        config.set("Administration", "voiceChannel", self.voiceChannel)
-        config.set("Administration", "usePrefix", self.usePrefix)
-        config.set("Administration", "prefix", self.prefix)
+        config.set("Administration", "Split admins/mods using \",\" don't use spaces. To grant access use the id of the user you wish to add.")
+        config.set("Administration", "Administrator", self.admin) if self.admin else config.set("Administration", "Administrator", "")
+        config.set("Administration", "Moderator", self.mod) if self.mod else config.set("Administration", "Moderator", "")
+        config.set("Administration", "")
+        config.set("Administration", "googleAPI", self.googleAPI) if self.googleAPI else config.set("Administration", "googleAPI", "")
+        config.set("Administration", "textChannel", self.textChannel) if self.textChannel else config.set("Administration", "textChannel", "")
+        config.set("Administration", "voiceChannel", self.voiceChannel) if self.voiceChannel else config.set("Administration", "voiceChannel", "")
+        config.set("Administration", "usePrefix", "true") if self.usePrefix == True else config.set("Administration", "usePrefix", "false")
+        config.set("Administration", "prefix", self.prefix) if self.prefix else config.set("Administration", "prefix", "")
 
         config.add_section("Bot")
-        config.set("Bot", "gameName", self.gameName)
-        config.set("Bot", "gameUrl", self.gameUrl)
-        config.set("Bot", "gameType", self.gameType)
+        config.set("Bot", "gameName", self.gameName) if self.gameName else config.set("Bot", "gameName", "")
+        config.set("Bot", "gameUrl", self.gameUrl) if self.gameUrl else config.set("Bot", "gameUrl", "https://wwww.twitch.tv/logout")
+        config.set("Bot", "gameType", str(self.gameType)) if self.gameType else config.set("Bot", "gameType", "0")
 
 class Embed:
     def __init__(self):
