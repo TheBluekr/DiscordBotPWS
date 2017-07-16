@@ -147,6 +147,9 @@ class MusicBot(discord.Client):
             except:
                 await self.send_message(message.channel, "```{error}```".format(error=traceback.format_exc()))
 
+        if(content.startswith("exit") or content.startswith("shutdown")):
+            await self.logout()
+
     async def on_voice_state_update(self, memberBefore, memberAfter):
         # Process voicestate updates from clients connected to voicechannel
         pass
@@ -237,6 +240,34 @@ class Config:
                 self.logger.critical("Bot token isn't configurated in the config")
                 self.logger.critical("Logging in won't work, improper login credentials has been passed!")
 
+        # Load admins and mods for command access
+        # Add level access?
+        self.logger.info("Loading admins")
+        self.admin = config.get("Administration", "Administrator", fallback=None)
+        if self.admin == "":
+            self.admin = None
+        if self.admin:
+            self.admin = self.admin.split(",")
+            if len(self.admin) != 1:
+                self.logger.info("Loaded {amount} admins".format(amount=len(self.admin)))
+            else:
+                self.logger.info("Loaded {amount} admin".format(amount=len(self.admin)))
+        else:
+            self.logger.warning("An administrator isn't configured, bot will default to server owner when joining")
+
+        self.logger.info("Loading mods")
+        self.mod = config.get("Administration", "Moderator", fallback=None)
+        if self.mod == "":
+            self.mod = None
+        if self.mod:
+            self.mod = self.mod.split(",")
+            if len(self.mod) != 1:
+                self.logger.info("Loaded {amount} mods".format(amount=len(self.mod)))
+            else:
+                self.logger.info("Loaded {amount} mod".format(amount=len(self.mod)))
+        else:
+            self.logger.warning("An monderator isn't configured, access is available to admin only")
+
         # Load Google API
         self.logger.info("Loading Google API token")
         self.googleAPI = config.get("Administration", "googleAPI", fallback=None)
@@ -281,7 +312,7 @@ class Config:
         # Load a game which the bot seems to play
         self.gameName = config.get("Bot", "gameName", fallback=None)
         self.gameUrl = config.get("Bot", "gameUrl", fallback=None)
-        self.gameType = config.get("Bot", "gameType", fallback=None)
+        self.gameType = config.getint("Bot", "gameType", fallback=None)
         if self.gameName == "":
             self.gameName = None
         if self.gameName:
@@ -304,6 +335,9 @@ class Config:
         config.set("Auth", "token", "")
 
         config.add_section("Administration")
+        config.set("Administration", "Administrator", "")
+        config.set("Administration", "Moderator", "")
+        config.set("Administration", "", "")
         config.set("Administration", "googleAPI", "")
         config.set("Administration", "textChannel", "")
         config.set("Administration", "voiceChannel", "")
@@ -330,6 +364,9 @@ class Config:
         config.set("Auth", "token", self.token)
 
         config.add_section("Administration")
+        config.set("Administration", "Administrator", self.admin)
+        config.set("Administration", "Moderator", self.mod)
+        config.set("Administration", "", "")
         config.set("Administration", "googleAPI", self.googleAPI)
         config.set("Administration", "textChannel", self.textChannel)
         config.set("Administration", "voiceChannel", self.voiceChannel)
