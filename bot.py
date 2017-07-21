@@ -57,10 +57,17 @@ class MusicBot(discord.Client):
             self.logger.warning("Settings folder was missing, creating it")
 
         self.fConfig = os.path.join("./settings", "config.cfg")
+        self.fPlaylist = os.path.join("./settings", "playlist.json")
 
         self.version = version
 
         self.config = Config(self.fConfig)
+        try:
+            self.playlistUrl = json.load(self.fPlaylist, "r")
+        except:
+            self.playListUrl = list()
+
+        self.playList = list()
 
         # Get auth
         if self.config.useToken:
@@ -115,10 +122,22 @@ class MusicBot(discord.Client):
         self.formatPrefix = self.user if not self.flagUsePrefix else self.prefix
         self.logger.info("Prefix set to \"{prefix}\"".format(prefix=self.formatPrefix))
 
+        if self.config.googleAPI:
+            for song in self.playListUrl:
+                # Let's retrieve all info we got, we'll receive None for title or duration if something went wrong
+                video = self.youtube.getVideo(song)
+                if(video.title and video.duration):
+                    self.playList.append([video.url, video.title, video.duration])
+                else:
+                    self.playList.append([video.url])
+        else:
+            for song in self.playListUrl:
+                self.playList.append([song])
+
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
         if(self.flagUsePrefix == False):
-            # Prevent issues, if this is smaller than 0 (wat?). Houston, we got a problem
+            # Prevent issues, if this is smaller than 0 (wat?), we got a problem
             if(len(message.raw_mentions) == 0):
                 return
             # It wasn't us who got tagged first, just ignore it I guess
@@ -128,7 +147,7 @@ class MusicBot(discord.Client):
             if(not message.content.startswith(self.prefix)):
                 return
         else:
-            # If neither of these match, we propably did something wrong in the config
+            # If neither of these match, propably something went wrong in the config
             self.logger.critical("The prefix isn't configured correctly! Updating config to default mention")
             self.config.usePrefix = False
             self.flagUsePrefix = False
@@ -150,7 +169,10 @@ class MusicBot(discord.Client):
                 return
 
             content = content.replace("add ", "", 1)
-            self.logger.info("Received link: \"{link}\", parsing".format(link=content))
+            if(content.startswith("https://www.") or content.startswith("www.")):
+                self.logger.info("Received link: \"{link}\", parsing".format(link=content))
+                # We declared youtube class at __init__, let's call it again with a key registered
+                url = self.youtube.parse(content)
 
         if content.startswith("eval"):
             if content.strip() == "eval":
@@ -159,6 +181,9 @@ class MusicBot(discord.Client):
                 return
 
             content = content.replace("eval ", "", 1)
+            # Censor private info from anyone
+            if ("self.email" or "self.password" or "self.token" or "self.config.email" or "self.config.password" or "self.config.token") in content:
+                await self.send_message(message.channel, "`Censored due to private info`")
             try:
                 output = eval(content)
                 await self.send_message(message.channel, "```{output}```".format(output=output))
@@ -207,7 +232,7 @@ class Youtube:
         if "list" in data:
             return {"url":data["list"][0],"typeUrl":"list"}
         else:
-            return {"url":data["v"][0],"typeUrl":"v"}
+            return {"url":data["v"][0],"typeUrl":"video"}
 
 class Config:
     def __init__(self, file):
