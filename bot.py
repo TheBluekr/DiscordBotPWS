@@ -3,7 +3,8 @@ version = "0.0.1b"
 # ToDo:
 # Fix change_presence at on_ready (done?)
 # Begin setting up on_message event
-#     Add exceptionMessage() to get custom error messages for both console and discord
+# 
+Add exceptionMessage() to get custom error messages for both console and discord
 # Add basic commands
 # Define setup event when joining server
 # Take current create_ytdl_player function from discord.py and use it on local level
@@ -97,6 +98,7 @@ class MusicBot(discord.Client):
         self.voiceChannel = None
         self.logChannelId = None
         self.logChannel = None
+        # Just if we want to get some info from our main server
         self.serverId = None
         self.musicPlaylist = list()
 
@@ -128,11 +130,14 @@ class MusicBot(discord.Client):
                 video = self.youtube.getVideo(song)
                 if(video.title and video.duration):
                     self.playList.append([video.url, video.title, video.duration])
-                else:
+                elif(video.url):
                     self.playList.append([video.url])
+                else:
+                    self.logger.warning("Couldn't retrieve any info about \"{url}\", is this video private or removed?")
         else:
             for song in self.playListUrl:
                 self.playList.append([song])
+        self.logger.info("Loaded {amount} songs".format(amount=len(self.playList)) if len(self.playList) != 1 else self.logger.info("Loaded {amount} song".format(amount=len(self.playList))
 
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
@@ -184,6 +189,7 @@ class MusicBot(discord.Client):
             # Censor private info from anyone
             if ("self.email" or "self.password" or "self.token" or "self.config.email" or "self.config.password" or "self.config.token") in content:
                 await self.send_message(message.channel, "`Censored due to private info`")
+                return
             try:
                 output = eval(content)
                 await self.send_message(message.channel, "```{output}```".format(output=output))
