@@ -3,12 +3,11 @@ version = "0.0.1b"
 # ToDo:
 # Fix change_presence at on_ready (done?)
 # Begin setting up on_message event
-# 
-Add exceptionMessage() to get custom error messages for both console and discord
+# Add exceptionMessage() to get custom error messages for both console and discord (later)
 # Add basic commands
 # Define setup event when joining server
-# Take current create_ytdl_player function from discord.py and use it on local level
-# Prepare for future rewrite
+# Take current create_ytdl_player function from discord.py and use it on local level (prepare for rewrite)
+# Prepare for future rewrite (more code)
 
 import discord
 import logging
@@ -20,7 +19,7 @@ import traceback
 
 # Declare global vars
 
-# Error message formats
+# Error message formats (could be done better)
 formatErrorSyntax = "Syntax error, correct usage: {format}"
 
 # Define root logger
@@ -63,12 +62,13 @@ class MusicBot(discord.Client):
         self.version = version
 
         self.config = Config(self.fConfig)
+        
+        # Try load all songs we got from earlier
         try:
-            self.playlistUrl = json.load(self.fPlaylist, "r")
+            self.playlist = json.load(self.fPlaylist, "r")
         except:
-            self.playListUrl = list()
-
-        self.playList = list()
+            # Either file has a mistake in indentations, has been corrupted or didn't exist. Let's create a new one later
+            self.playlist = list()
 
         # Get auth
         if self.config.useToken:
@@ -90,6 +90,14 @@ class MusicBot(discord.Client):
 
         # Store this for later usage when returning usage messages
         self.formatPrefix = None
+        
+        # Vote lists and properties
+        # Store also if we reach the point
+        self.voteSkipList = list()
+        self.voteSkip = False
+        self.voteShuffleList = list()
+        self.voteShuffle = False
+        self.votePercentage = self.config.votePercentage
 
         # Server related setup
         self.textChannelId = self.config.textChannel
@@ -99,13 +107,30 @@ class MusicBot(discord.Client):
         self.logChannelId = None
         self.logChannel = None
         # Just if we want to get some info from our main server
-        self.serverId = None
-        self.musicPlaylist = list()
+        self.server = None
 
         self.game = discord.Game()
         self.game.name = self.config.gameName
         self.game.url = self.config.gameUrl
         self.game.type = self.config.gameType
+        
+        # Check if voting is enabled
+        self.voteEnabled = self.config.voteEnabled
+        if self.voteEnabled:
+            self.voteSkipEnabled = self.config.voteSkipEnabled
+            self.voteShuffleEnabled = self.config.voteShuffleEnabled
+            if(self.voteSkipEnabled and self.voteShuffleEnabled):
+                self.logger.info("Voting enabled")
+            elif(self.voteSkipEnabled):
+                self.logger.info("Skip vote only enabled")
+            elif(self.voteShuffleEnabled):
+                self.logger.info("Shuffle vote only enabled")
+            self.votePercentage = self.config.votePercentage
+            self.logger.info("Set vote requirement percentage to \"{percentage\"".format(percentage=self.votePercentage))
+        else:
+            self.logger.info("Voting disabled")
+            self.voteSkipEnabled = False
+            self.voteShuffleEnabled = False
         
         self.youtube = Youtube(self.config.googleAPI)
 
@@ -124,20 +149,27 @@ class MusicBot(discord.Client):
         self.formatPrefix = self.user if not self.flagUsePrefix else self.prefix
         self.logger.info("Prefix set to \"{prefix}\"".format(prefix=self.formatPrefix))
 
-        if self.config.googleAPI:
-            for song in self.playListUrl:
-                # Let's retrieve all info we got, we'll receive None for title or duration if something went wrong
-                video = self.youtube.getVideo(song)
-                if(video.title and video.duration):
-                    self.playList.append([video.url, video.title, video.duration])
-                elif(video.url):
-                    self.playList.append([video.url])
-                else:
-                    self.logger.warning("Couldn't retrieve any info about \"{url}\", is this video private or removed?")
-        else:
-            for song in self.playListUrl:
-                self.playList.append([song])
-        self.logger.info("Loaded {amount} songs".format(amount=len(self.playList)) if len(self.playList) != 1 else self.logger.info("Loaded {amount} song".format(amount=len(self.playList))
+#        if self.config.googleAPI:
+#            for song in self.playListUrl:
+#                # Let's retrieve all info we got, we'll receive None for title or duration if something went wrong
+#                video = self.youtube.getVideo(song)
+#                if(video.title and video.duration):
+#                    self.playList.append([video.url, video.title, video.duration])
+#                elif(video.url):
+#                    self.playList.append([video.url])
+#                else:
+#                    self.logger.warning("Couldn't retrieve any info about \"{url}\", is this video private or removed?")
+#        else:
+#            for song in self.playListUrl:
+#                self.playList.append([song])
+#        self.logger.info("Loaded {amount} songs".format(amount=len(self.playList)) if len(self.playList) != 1 else self.logger.info("Loaded {amount} song".format(amount=len(self.playList))
+        
+        # We'll receive None if not found
+        self.textChannel = self.get_channel(self.textChannelId)
+        self.voiceChannel = self.get_channel(self.voiceChannelId)
+        self.logChannel = self.get_channel(self.logChannelId)
+        if self.textChannel:
+           self.server = self.textChannel.server
 
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
@@ -169,6 +201,7 @@ class MusicBot(discord.Client):
         # We want to make sure there's something after the add, it can't be empty right?
         if content.startswith("add"):
             if content.strip() == "add":
+                # Credits to Plue for informing me about this method
                 self.logger.error("No arguments were passed after \"add\", aborting")
                 await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} add <URL / id>\"```".format(prefix=self.formatPrefix)))
                 return
@@ -202,7 +235,52 @@ class MusicBot(discord.Client):
 
     async def on_voice_state_update(self, memberBefore, memberAfter):
         # Process voicestate updates from clients connected to voicechannel
-        pass
+        updateVoteState = False
+        if((memberBefore.voice.voice_channel != self.voiceChannel) or (memberAfter.voice.voice_channel) != self.voiceChannel))
+            return
+            # We don't want to parse voicechannel info which doesn't involve us
+        if(memberAfter.voice.voice_channel == None):
+            if(memberAfter.id in self.voteSkipList):
+                self.voteSkipList.remove(memberAfter.id)
+                # Return channel he disconnected from, he has to have a voicechannel before he disconnected at memberBefore
+                self.logger.info("{user} ({userid}) disconnected from {channel} ({channelid}), removing from skip vote".format(user=memberAfter.name, userid=memberAfter.id, channel=memberBefore.voice.voice_channel.name, channelid=memberBefore.voice.voice_channel.id))
+                updateVoteState = True
+            if(memberAfter.id in self.voteShuffleList):
+                self.voteShuffleList.remove(memberAfter.id)
+                self.logger.info("{user} disconnected from {channel} ({channelid}), removing from shuffle/scramble vote".format(user=memberAfter.name, userid=memberAfter.id, channel=memberBefore.voice.voice_channel.name, channelid=memberBefore.voice.voice_channel.id))
+                super().updateVoteState()
+            # Nothing to do here, let's terminate
+            return
+        if(memberAfter.voice.deaf or memberAfter.voice.self_deaf):
+            if(memberAfter.id in self.voteSkipList):
+                self.voteSkipList.remove(memberAfter.id)
+                # Return channel he disconnected from, he has to have a voicechannel before he disconnected at memberBefore
+                self.logger.info("{user} ({userid}) deafened at {channel} ({channelid}), removing from skip vote".format(user=memberAfter.name, userid=memberAfter.id, channel=memberBefore.voice.voice_channel.name, channelid=memberBefore.voice.voice_channel.id))
+                flUpdateVoteState = True
+            if(memberAfter.id in self.voteShuffleList):
+                self.voteShuffleList.remove(memberAfter.id)
+                self.logger.info("{user} ({userid}) deafened at {channel} ({channelid}), removing from shuffle/scramble vote".format(user=memberAfter.name, userid=memberAfter.id, channel=memberBefore.voice.voice_channel.name, channelid=memberBefore.voice.voice_channel.id))
+                flUpdateVoteState = True
+            # Nothing to do here, let's terminate after checking the votes
+            if flUpdateVoteState:
+                super().updateVoteState()
+            return
+
+    def updateVoteState(self):
+        if self.is_voice_connected(self.server):
+            if(self.voice.voice_channel == self.voiceChannel):
+                voiceMembers = list()
+                # Check if 75% of the voice members matching the criteria has voted
+                for member in self.voiceChannel.voice_members:
+                    if self.user == member:
+                        continue
+                    if (member.voice.deaf or member.voice.self_deaf):
+                        continue
+                    voiceMembers.append(member)
+                if((len(voiceMembers)/len(self.voteSkipList) >= self.votePercentage) and voteSkipEnabled):
+                    self.voteSkip = True
+                if((len(voicemembers)/len(self.voteShuffleList) >= self.votePercentage) and voteShuffleEnabled):
+                    self.voteShuffle = True
 
     async def on_server_join(self, server):
         pass
@@ -214,12 +292,12 @@ class MusicBot(discord.Client):
             if(self.userToken == None):
                 self.logger.critical("Token isn't defined, aborting")
                 return
-            super().run(self.userToken)
+            await super().start(self.userToken)
         else:
             if((self.userName == None) or (self.userPassword == None)):
                 self.logger.critical("Login credentials aren't defined, aborting")
                 return
-            super().run(self.userName,self.userPassword)
+            await super().start(self.userName,self.userPassword)
 
 class Youtube:
     def __init__(self, key=None):
@@ -250,9 +328,6 @@ class Config:
         # Add check for existence of file, if not, make one
         if not os.path.exists(self.file):
             self.reset()
-
-        # In case we find an exception, add this to the counter
-        self.errors = 0
 
         # Read the config for vars
         config = configparser.ConfigParser()
@@ -331,6 +406,7 @@ class Config:
            self.logger.warning("Google API key isn't configured, some features will not work as intended")
 
         # Define channels we can use as bot
+        # If someone improperly configurated a channel, we'll split and take first as default
         self.textChannel = config.get("Administration", "textChannel", fallback=None)
         if self.textChannel == "":
             self.textChannel = None
@@ -342,11 +418,18 @@ class Config:
             self.voiceChannel = None
         if self.voiceChannel:
             self.voiceChannel = self.voiceChannel.split(",")
-            # If someone improperly configurated voicechannel, take first as default
             if(len(self.voiceChannel > 1) and (isinstance(self.voiceChannel, list) == True)):
                 self.voiceChannel = self.voiceChannel[0]
+        
+        self.logChannel = config.get("Administration", "logChannel", fallback=None)
+        if self.logChannel == "":
+            self.logChannel = None
+        if self.logChannel:
+            self.logChannel = self.logChannel.split(",")
+            if(len(self.logChannel > 1) and (isinstance(self.voiceChannel, list) == True)):
+                self.logChannel = self.logChannel[0]
 
-       # Use by default not a custom prefix, if true, use the configured one
+        # Use by default not a custom prefix, if true, use the configured one
         self.usePrefix = config.getboolean("Administration", "usePrefix", fallback=False)
         self.prefix = config.get("Administration", "prefix", fallback=None)
 
@@ -378,6 +461,11 @@ class Config:
             else:
                 self.logger.info("Loaded game \"{name}\"".format(name=self.gameName))
 
+        self.voteEnabled = config.getboolean("Voting", "voteEnabled")
+        self.voteSkipEnabled = config.getboolean("Voting", "voteSkipEnabled")
+        self.voteShuffleEnabled = config.getboolean("Voting", "voteShuffleEnabled")
+        self.votePercentage = config.getfloat("Voting", "votePercentage")
+
         # Just make sure the config isn't missing any sections
         Config.update(self)
 
@@ -391,9 +479,10 @@ class Config:
         config.set("Auth", "token", "")
         config.set("Auth", "email", "")
         config.set("Auth", "password", "")
+        config.set("Auth", "")
 
         config.add_section("Administration")
-        config.set("Administration", "Split admins/mods using \",\" don't use spaces. To grant access use the id of the user you wish to add.")
+        config.set("Administration", "; Split admins/mods using \",\" don't use spaces. To grant access use the id of the user you wish to add.")
         config.set("Administration", "Administrator", "")
         config.set("Administration", "Moderator", "")
         config.set("Administration", "")
@@ -402,44 +491,59 @@ class Config:
         config.set("Administration", "voiceChannel", "")
         config.set("Administration", "usePrefix", "false")
         config.set("Administration", "prefix", "")
+        config.set("Administration", "")
 
         config.add_section("Bot")
-        config.set("Bot", "gameName", self.gameName) if self.gameName else config.set("Bot", "gameName", "")
-        config.set("Bot", "gameUrl", self.gameUrl) if self.gameUrl else config.set("Bot", "gameUrl", "https://wwww.twitch.tv/logout")
-        config.set("Bot", "gameType", self.gameType) if self.gameType else config.set("Bot", "gameType", "0")
+        config.set("Bot", "gameName", "")
+        config.set("Bot", "gameUrl", "https://wwww.twitch.tv/logout")
+        config.set("Bot", "gameType", "0")
+
+        config.set("Voting", "voteEnabled", "true")
+        config.set("Voting", "voteSkipEnabled", "true")
+        config.set("Voting", "voteShuffleEnabled", "true")
+        config.set("Voting", "votePercentage", "0.75")
 
     def update(self):
         config = configparser.ConfigParser(allow_no_value=True)
 
         # Update info from the class values in config in case we changed during the usage or if things were missing from boot
         config.add_section("Auth")
-        config.set("Auth", "useToken", "true") if self.useToken == True else config.set("Auth", "useToken", "false")
+        config.set("Auth", "useToken", "true") if (self.useToken == True) else config.set("Auth", "useToken", "false")
         config.set("Auth", "token", self.token) if self.token else config.set("Auth", "token", "")
         config.set("Auth", "email", self.email) if self.email else config.set("Auth", "email", "")
         config.set("Auth", "password", self.password) if self.password else config.set("Auth", "password", "")
+        config.set("Auth", "")
 
         config.add_section("Administration")
-        config.set("Administration", "Split admins/mods using \",\" don't use spaces. To grant access use the id of the user you wish to add.")
+        config.set("Administration", "; Split admins/mods using \",\" don't use spaces. To grant access use the id of the user you wish to add.")
         config.set("Administration", "Administrator", self.admin) if self.admin else config.set("Administration", "Administrator", "")
         config.set("Administration", "Moderator", self.mod) if self.mod else config.set("Administration", "Moderator", "")
         config.set("Administration", "")
         config.set("Administration", "googleAPI", self.googleAPI) if self.googleAPI else config.set("Administration", "googleAPI", "")
         config.set("Administration", "textChannel", self.textChannel) if self.textChannel else config.set("Administration", "textChannel", "")
         config.set("Administration", "voiceChannel", self.voiceChannel) if self.voiceChannel else config.set("Administration", "voiceChannel", "")
-        config.set("Administration", "usePrefix", "true") if self.usePrefix == True else config.set("Administration", "usePrefix", "false")
+        config.set("Administration", "usePrefix", "true") if (self.usePrefix == True) else config.set("Administration", "usePrefix", "false")
         config.set("Administration", "prefix", self.prefix) if self.prefix else config.set("Administration", "prefix", "")
+        config.set("Administration", "")
 
         config.add_section("Bot")
         config.set("Bot", "gameName", self.gameName) if self.gameName else config.set("Bot", "gameName", "")
         config.set("Bot", "gameUrl", self.gameUrl) if self.gameUrl else config.set("Bot", "gameUrl", "https://wwww.twitch.tv/logout")
         config.set("Bot", "gameType", str(self.gameType)) if self.gameType else config.set("Bot", "gameType", "0")
+        config.set("Bot", "")
+
+        config.set("Voting", "voteEnabled", self.voteEnabled) if (self.voteEnabled == False) else config.set("Playlist", "voteEnabled", "true")
+        config.set("Voting", "voteSkipEnabled", self.voteSkipEnabled) if (self.voteSkipEnabled == False) else config.set("Playlist", "voteSkipEnabled", "true")
+        config.set("Voting", "voteShuffleEnabled", self.voteShuffleEnabled) if (self.voteShuffleEnabled == False) else config.set("Playlist", "voteShuffleEnabled", "true")
+        config.set("Voting", "votePercentage", str(self.votePercentage)) if isinstance(self.votePercentage, float) else config.set("Playlist", "votePercentage", "0.75")
 
 class Embed:
-    def __init__(self):
+    def __init__(self, author=None, title=None, url=None, **kwargs):
         pass
 
-    def embed(self, author=None, title=None, url=None, **kwargs):
-        pass
+    def embed(self):
+        embed = discord.Embed()
+        return None # For now
 
 bot = MusicBot()
 bot.run()
