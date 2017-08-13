@@ -9,6 +9,7 @@ version = "0.0.1b"
 # Take current create_ytdl_player function from discord.py and use it on local level (prepare for rewrite)
 # Prepare for future rewrite (more code)
 
+import asyncio
 import discord
 import logging
 import os
@@ -16,6 +17,7 @@ import configparser
 import datetime
 import urllib.parse
 import traceback
+import random
 
 # Declare global vars
 
@@ -98,6 +100,9 @@ class MusicBot(discord.Client):
         self.voteShuffleList = list()
         self.voteShuffle = False
         self.votePercentage = self.config.votePercentage
+        
+        self.player = None
+        self.playerVolume = 1.0
 
         # Server related setup
         self.textChannelId = self.config.textChannel
@@ -185,14 +190,19 @@ class MusicBot(discord.Client):
                 return
         else:
             # If neither of these match, propably something went wrong in the config
-            self.logger.critical("The prefix isn't configured correctly! Updating config to default mention")
+            self.logger.error("The prefix isn't configured correctly! Updating config to default mention")
             self.config.usePrefix = False
             self.flagUsePrefix = False
             self.config.update()
+            try:
+                await self.send_message(message.channel, "Something went wrong, please try again using \n{prefix} {content}```".format(prefix=self.user.mention, content = message.content.split(' ', 1)[1]))
+            except IndexError:
+                await self.send_message(message.channel, "Something went wrong, please try again") 
             return
 
         # Remove first prefix or mention we checked
         try:
+            # Credits to Plue for informing me about this method
             content = message.content.split(' ', 1)[1]
         except IndexError:
             return
@@ -201,20 +211,65 @@ class MusicBot(discord.Client):
         # We want to make sure there's something after the add, it can't be empty right?
         if content.startswith("add"):
             if content.strip() == "add":
-                # Credits to Plue for informing me about this method
                 self.logger.error("No arguments were passed after \"add\", aborting")
                 await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} add <URL / id>\"```".format(prefix=self.formatPrefix)))
                 return
 
             content = content.replace("add ", "", 1)
             if(content.startswith("https://www.") or content.startswith("www.")):
-                self.logger.info("Received link: \"{link}\", parsing".format(link=content))
+                self.logger.debug("Received link: \"{link}\", parsing".format(link=content))
                 # We declared youtube class at __init__, let's call it again with a key registered
                 url = self.youtube.parse(content)
                 if(url["typeUrl"] == "video"):
-                    self.logger.info("Received video with id \"{id}\"".format(id=url["url"]))
+                    self.logger.debug("Received video with id \"{id}\"".format(id=url["url"]))
                 else:
-                    self.logger.info("Received list with id \"{id}\"".format(id=url["url"]))
+                    self.logger.debug("Received list with id \"{id}\"".format(id=url["url"]))
+
+        if content.startswith("play"):
+            if len(self.playlist) == 0:
+                await self.send_message(message.channel, "Playlist is empty")
+                return
+            if self.is_voice_connected(self.server):
+                if(self.user.voice.voice_channel != self.voiceChannel):
+                    return
+                while len(self.playlist > 0):
+                    self.logger.debug("Preparing {song} (\"{id}\", \"{duration}\")".format(song=self.playlist[0][0], id=self.playlist[0][1], duration=self.playlist[0][2]))
+                    self.voteSkip = False
+                    self.voteShuffle = False
+                    self.player = await self.create_ytdl_player(self.playlist[0][1])
+                    # Based on API we should receive None when youtube-dl fails to extract info
+                    if self.voicePlayer.title == None:
+                        self.logger.error("Youtube-dl failed to extract info from \"{title}\"".format(title=self.playlist[0][0]))
+                        del self.playlist[0]
+                        continue
+                    self.player.volume = self.playerVolume
+                    self.player.start()
+                    while(self.player.is_playing() and not self.player.is_done()):
+                        await asyncio.sleep(1)
+                        if(self.voteShuffle):
+                            if len(self.playlist) > 2):
+                                # We want to make sure we're not going to repeat our current song
+                                self.song = self.playlist[0]
+                                del self.playlist[0]
+                                random.shuffle(self.playlist)
+                                self.playlist.insert(0, self.song)
+                                self.voteShuffleList = list()
+                                self.voteShuffle = False
+                                await self.send_message(message.channel, "Shuffling playlist")
+                            else:
+                                self.voteShuffleList = list()
+                                self.voteShuffle = False
+                                await self.send_message(message.channel, "Playlist is too short to shuffle!")
+                        if(self.voteSkip):
+                            self.voteSkipList = list()
+                            self.voteSkip = False
+                            await self.send_message(message.channel, "Skipping current song")
+                            break
+                    # Prevent further things from happening at other commands
+                    self.player = None
+                    self.voteSkipList = list()
+                    self.voteSkip = False
+                    del self.playlist[0]
 
         if content.startswith("eval"):
             if content.strip() == "eval":
@@ -235,6 +290,7 @@ class MusicBot(discord.Client):
                 await self.send_message(message.channel, "```{error}```".format(error=traceback.format_exc()))
 
         if(content.startswith("exit") or content.startswith("shutdown")):
+            self.logger.info("Shutting down")
             await self.logout()
 
     async def on_voice_state_update(self, memberBefore, memberAfter):
@@ -272,11 +328,11 @@ class MusicBot(discord.Client):
 
     def updateVoteState(self):
         if self.is_voice_connected(self.server):
-            if(self.voice.voice_channel == self.voiceChannel):
+            if(self.user.voice.voice_channel == self.voiceChannel):
                 voiceMembers = list()
                 # Check if 75% of the voice members matching the criteria has voted
                 for member in self.voiceChannel.voice_members:
-                    if self.user == member:
+                    if member == self.user:
                         continue
                     if (member.voice.deaf or member.voice.self_deaf):
                         continue
