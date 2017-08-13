@@ -113,6 +113,9 @@ class MusicBot(discord.Client):
         self.logChannelId = None
         self.logChannel = None
         self.server = None
+        
+        self.admin = self.config.admin
+        self.mod = self.config.mod
 
         self.game = discord.Game()
         self.game.name = self.config.gameName
@@ -136,8 +139,10 @@ class MusicBot(discord.Client):
             self.logger.info("Voting disabled")
             self.voteSkipEnabled = False
             self.voteShuffleEnabled = False
+            
+        self.googleAPI = self.config.googleAPI
         
-        self.youtube = Youtube(self.config.googleAPI)
+        self.youtube = Youtube(self.googleAPI)
 
     async def on_ready(self):
         # Initialize login and states
@@ -216,14 +221,62 @@ class MusicBot(discord.Client):
                 return
 
             content = content.replace("add ", "", 1)
-            if(content.startswith("https://www.") or content.startswith("www.")):
+            # We got something prioritized, lets add some checks
+            if (len(content.split(' ', 1)) == 2):
+                if ((message.author in self.mods) or (message.author in self.admins)):
+                    try:
+                        queuePos = int(content.split(' ', 1)[1])
+                        if queuePos == 0:
+                            queuePos += 1
+                            content = content.split(' ', 1)[0]
+                    except:
+                        queuePos = len(self.playlist)
+                        content = content.split(' ', 1)[0]
+                        await self.send_message(message.channel, "Failed to put song at given position \nUnknown number was given")
+                else:
+                    queuePos = len(self.playlist)
+                    content = content.split(' ', 1)[0]
+            else:
+                queuePos = len(self.playlist)
+            
+            songList = list()
+            song = list()
+            
+            # Add support for complete playlists if we have the API
+            # It could happen we had an shortened one so we can't take full link
+            if(content.startswith("https://www.youtu") or content.startswith("www.youtu")):
                 self.logger.debug("Received link: \"{link}\", parsing".format(link=content))
                 # We declared youtube class at __init__, let's call it again with a key registered
                 url = self.youtube.parse(content)
                 if(url["typeUrl"] == "video"):
                     self.logger.debug("Received video with id \"{id}\"".format(id=url["url"]))
-                else:
+                elif(url["typeUrl"] == "list"):
                     self.logger.debug("Received list with id \"{id}\"".format(id=url["url"]))
+                # Add youtube API requests here
+                # <code>
+                if (url["typeUrl"] == "video"):
+                    #if (self.googleAPI):
+                    if (False):
+                        pass
+                        # Add code for retrieving info from Youtube
+                    else:
+                        song.append(url["url"])
+                        song.append(message.author.id)
+                        songList.append(song)
+                elif(url["typeUrl"] == "list"):
+                    await self.send_message(message.channel, "Lists adding isn't supported... for now")
+                else:
+                    # We'll receive an unknown typeUrl when googleAPI isn't configured
+                    pass
+                
+            # Easy method to parse multiple songs in case, not efficient for 1 only
+            for song in songList:
+                self.playlist.insert(queuePos+songList.index(song), song)
+            if(len(songList) == 1):
+                if(len(song) == 2):
+                    await self.send_message(message.channel, "Added {url} at position {pos}".format(url=song[0], pos=queuePos))
+                else:
+                    await self.send_message(message.channel, "Added {song} at position {pos}".format(song=None, pos=queuePos))
 
         if content.startswith("play"):
             if len(self.playlist) == 0:
@@ -401,7 +454,7 @@ class Youtube:
         data = urllib.parse.parse_qs(url_data.query)
         if "list" in data:
             return {"url":data["list"][0],"typeUrl":"list"}
-        else:
+        elif "v" in data:
             return {"url":data["v"][0],"typeUrl":"video"}
 
 class Config:
