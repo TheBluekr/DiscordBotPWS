@@ -109,9 +109,9 @@ class MusicBot(discord.Client):
         self.textChannel = None
         self.voiceChannelId = self.config.voiceChannel
         self.voiceChannel = None
+        self.voiceClient = None
         self.logChannelId = None
         self.logChannel = None
-        # Just if we want to get some info from our main server
         self.server = None
 
         self.game = discord.Game()
@@ -233,17 +233,25 @@ class MusicBot(discord.Client):
                 if(self.user.voice.voice_channel != self.voiceChannel):
                     return
                 while len(self.playlist > 0):
-                    self.logger.debug("Preparing {song} (\"{id}\", \"{duration}\")".format(song=self.playlist[0][0], id=self.playlist[0][1], duration=self.playlist[0][2]))
+                    # We've got 3 elements in the list when the API was used and an author which added it
+                    if(len(self.playlist[0]) == 4):
+                        self.logger.debug("Preparing {song} (\"{id}\", \"{duration}\"), added by {author} (\"{authorId}\")".format(song=self.playlist[0][1], id=self.playlist[0][0], duration=self.playlist[0][2], author=self.get_member(self.playlist[0][3]), authorId=self.playlist[0][3]))
+                    else:
+                        self.logger.debug("Preparing song (\"{id}\"), added by {author} (\"{authorId}\")".format(id=self.playlist[0][0], author=self.get_member(self.playlist[0][3]), authorId=self.playlist[0][3]))
                     self.voteSkip = False
                     self.voteShuffle = False
-                    self.player = await self.create_ytdl_player(self.playlist[0][1])
+                    self.player = await self.voiceClient.create_ytdl_player(self.playlist[0][0])
                     # Based on API we should receive None when youtube-dl fails to extract info
-                    if self.voicePlayer.title == None:
+                    if self.player.title == None:
                         self.logger.error("Youtube-dl failed to extract info from \"{title}\"".format(title=self.playlist[0][0]))
                         del self.playlist[0]
                         continue
                     self.player.volume = self.playerVolume
                     self.player.start()
+                    if (len(self.playlist[0] == 4):
+                        await self.send_message(message.channel, "Started playing {song}".format(song=self.player.title))
+                    else:
+                        await self.send_message(message.channel, "Started playing {song}".format(song=self.playlist[0][1]))
                     while(self.player.is_playing() and not self.player.is_done()):
                         await asyncio.sleep(1)
                         if(self.voteShuffle):
@@ -296,6 +304,7 @@ class MusicBot(discord.Client):
     async def on_voice_state_update(self, memberBefore, memberAfter):
         # Process voicestate updates from clients connected to voicechannel
         updateVoteState = False
+        super().checkVoiceClient()
         if((memberBefore.voice.voice_channel != self.voiceChannel) or (memberAfter.voice.voice_channel) != self.voiceChannel))
             return
             # We don't want to parse voicechannel info which doesn't involve us
@@ -341,6 +350,23 @@ class MusicBot(discord.Client):
                     self.voteSkip = True
                 if((len(voicemembers)/len(self.voteShuffleList) >= self.votePercentage) and voteShuffleEnabled):
                     self.voteShuffle = True
+    
+    def checkVoiceClient(self):
+        if self.is_voice_connected(self.server):
+            if self.user.voice.voice_channel == self.voiceChannel:
+                if(len(self.voiceChannel.voice_members) == 1):
+                    self.voiceClient = self.voice_client_in(self.server)
+                    await self.voiceClient.disconnect()
+                    self.voiceClient = None
+                else:
+                    # Nothing to be concerned about, resume earlier code
+                    return
+            else:
+                # Guess we got moved, lets go back
+                await self.move_to(self.voiceChannel)
+                self.voiceClient = self.voice_client_in(self.server)
+        else:
+            self.voiceClient = await self.join_voice_channel(self.voiceChannel)
 
     async def on_server_join(self, server):
         pass
