@@ -211,6 +211,10 @@ class MusicBot(discord.Client):
                 self.logger.info("Received link: \"{link}\", parsing".format(link=content))
                 # We declared youtube class at __init__, let's call it again with a key registered
                 url = self.youtube.parse(content)
+                if(url["typeUrl"] == "video"):
+                    self.logger.info("Received video with id \"{id}\"".format(id=url["url"]))
+                else:
+                    self.logger.info("Received list with id \"{id}\"".format(id=url["url"]))
 
         if content.startswith("eval"):
             if content.strip() == "eval":
