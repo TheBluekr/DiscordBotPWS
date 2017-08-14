@@ -301,7 +301,7 @@ class MusicBot(discord.Client):
                         continue
                     self.player.volume = self.playerVolume
                     self.player.start()
-                    if (len(self.playlist[0] == 4):
+                    if (len(self.playlist[0]) == 4):
                         await self.send_message(message.channel, "Started playing {song}".format(song=self.player.title))
                     else:
                         await self.send_message(message.channel, "Started playing {song}".format(song=self.playlist[0][1]))
@@ -406,7 +406,7 @@ class MusicBot(discord.Client):
     
     def checkVoiceClient(self):
         if self.is_voice_connected(self.server):
-            if self.user.voice.voice_channel == self.voiceChannel:
+            if(self.user.voice.voice_channel == self.voiceChannel):
                 if(len(self.voiceChannel.voice_members) == 1):
                     self.voiceClient = self.voice_client_in(self.server)
                     await self.voiceClient.disconnect()
@@ -422,7 +422,19 @@ class MusicBot(discord.Client):
             self.voiceClient = await self.join_voice_channel(self.voiceChannel)
 
     async def on_server_join(self, server):
-        pass
+        if(self.textChannel == None):
+            #await self.send_message(server.owner, "<text about configuring music channel>")
+            flagPass = False
+            while(flagPass == False):
+                message = await self.wait_for_message(timeout=180.0, author=server.owner)
+                if not message:
+                    continue
+                if(len(message.raw_channel_mentions) >= 1):
+                    channel = server.get_channel(message.raw_channel_mentions[0])
+                    if channel.type == discord.ChannelType.text:
+                        self.textChannel = channel
+                        break
+            
 
     def run(self):
         self.logger.info("Logging in")
@@ -628,6 +640,7 @@ class Config:
         config.set("Administration", "googleAPI", "")
         config.set("Administration", "textChannel", "")
         config.set("Administration", "voiceChannel", "")
+        config.set("Administration", "logChannel", "") if self.logChannel else pass
         config.set("Administration", "usePrefix", "false")
         config.set("Administration", "prefix", "")
         config.set("Administration", "")
@@ -661,6 +674,7 @@ class Config:
         config.set("Administration", "googleAPI", self.googleAPI) if self.googleAPI else config.set("Administration", "googleAPI", "")
         config.set("Administration", "textChannel", self.textChannel) if self.textChannel else config.set("Administration", "textChannel", "")
         config.set("Administration", "voiceChannel", self.voiceChannel) if self.voiceChannel else config.set("Administration", "voiceChannel", "")
+        config.set("Administration", "logChannel", self.logChannel) if self.logChannel else pass
         config.set("Administration", "usePrefix", "true") if (self.usePrefix == True) else config.set("Administration", "usePrefix", "false")
         config.set("Administration", "prefix", self.prefix) if self.prefix else config.set("Administration", "prefix", "")
         config.set("Administration", "")
