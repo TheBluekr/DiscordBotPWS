@@ -1,10 +1,9 @@
-version = "0.0.1b"
+version = "0.0.1c"
 
-# ToDo:
-# Fix change_presence at on_ready (done?)
-# Begin setting up on_message event
+# To-Do:
+# Extend property list at Video class
+# Add API requests at Youtube class
 # Add exceptionMessage() to get custom error messages for both console and discord (later)
-# Add basic commands
 # Define setup event when joining server
 # Take current create_ytdl_player function from discord.py and use it on local level (prepare for rewrite)
 # Prepare for future rewrite (more code)
@@ -221,6 +220,14 @@ class MusicBot(discord.Client):
                 return
 
             content = content.replace("add ", "", 1)
+            
+            # Want to make sure we're getting the int as last
+            try:
+                int(content.split(' ', 1)[0])
+                content = content.split(' ', 1).reverse()
+            except ValueError:
+                pass
+            
             # We got something prioritized, lets add some checks
             if (len(content.split(' ', 1)) == 2):
                 if ((message.author in self.mods) or (message.author in self.admins)):
@@ -464,10 +471,21 @@ class Youtube:
         # Use this if we get a https://www.youtube.com/ link
         url_data = urllib.parse.urlparse(url)
         data = urllib.parse.parse_qs(url_data.query)
-        if "list" in data:
-            return {"url":data["list"][0],"typeUrl":"list"}
-        elif "v" in data:
+        try:
             return {"url":data["v"][0],"typeUrl":"video"}
+        except ValueError:
+            return {"url":data["list"][0],"typeUrl":"list"}
+        except:
+            return {"url":None, "typeUrl":None}
+
+# Storing info from videos
+class Video:
+    def __init__(self, url, title=None, duration=None, views=None, region=None):
+        self.url = url
+        self.title = title
+        self.duration = duration
+        self.views = views
+        self.region = region
 
 class Config:
     def __init__(self, file):
