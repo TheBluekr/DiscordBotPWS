@@ -1,4 +1,4 @@
-version = "0.0.2a"
+version = "0.0.2a-Hotfix-1"
 
 # To-Do:
 # Extend property list at Video class (done?)
@@ -120,10 +120,10 @@ class MusicBot(discord.Client):
         self.admin = self.config.admin
         self.mod = self.config.mod
 
-        self.game = discord.Game()
-        self.game.name = self.config.gameName
-        self.game.url = self.config.gameUrl
-        self.game.type = self.config.gameType
+        self.game = discord.Game(
+            name = self.config.gameName,
+            url = self.config.gameUrl,
+            type = self.config.gameType)
         
         # Check if voting is enabled
         self.voteEnabled = self.config.voteEnabled
@@ -137,7 +137,7 @@ class MusicBot(discord.Client):
             elif(self.voteShuffleEnabled):
                 self.logger.info("Shuffle vote only enabled")
             self.votePercentage = self.config.votePercentage
-            self.logger.info("Set vote requirement percentage to \"{percentage\"".format(percentage=self.votePercentage))
+            self.logger.info("Set vote requirement percentage to {percentage}%".format(percentage=int(self.votePercentage*100)))
         else:
             self.logger.info("Voting disabled")
             self.voteSkipEnabled = False
@@ -199,7 +199,7 @@ class MusicBot(discord.Client):
             if(message.raw_mentions[0] != self.user.id):
                 return
             # Check if the bot was tagged first
-            if not message.startswith(self.user.mention)):
+            if not message.content.startswith(self.user.mention):
                 return
         elif((self.flagUsePrefix == True) and (self.prefix != None)):
             if(not message.content.startswith(self.prefix)):
@@ -279,7 +279,7 @@ class MusicBot(discord.Client):
                         
                         # Received the content from the API, parse it for the id's
                         for video in content["items"]:
-                            videoList.append(video["snippet"]["resourceId"]["videoId"]))
+                            videoList.append(video["snippet"]["resourceId"]["videoId"])
                     else:
                         self.send_message(message.channel, "List adding is disabled \nPlease contact the host if looking to enable this")
                         return
@@ -340,7 +340,7 @@ class MusicBot(discord.Client):
                     while(self.player.is_playing() and not self.player.is_done()):
                         await asyncio.sleep(1)
                         if(self.voteShuffle):
-                            if len(self.playlist) > 2):
+                            if(len(self.playlist) > 2):
                                 # We want to make sure we're not going to repeat our current song
                                 self.song = self.playlist[0]
                                 del self.playlist[0]
@@ -389,8 +389,8 @@ class MusicBot(discord.Client):
     async def on_voice_state_update(self, memberBefore, memberAfter):
         # Process voicestate updates from clients connected to voicechannel
         updateVoteState = False
-        super().checkVoiceClient()
-        if((memberBefore.voice.voice_channel != self.voiceChannel) or (memberAfter.voice.voice_channel) != self.voiceChannel))
+        await checkVoiceClient()
+        if((memberBefore.voice.voice_channel != self.voiceChannel) or (memberAfter.voice.voice_channel != self.voiceChannel)):
             return
             # We don't want to parse voicechannel info which doesn't involve us
         if(memberAfter.voice.voice_channel == None):
@@ -417,7 +417,7 @@ class MusicBot(discord.Client):
                 flUpdateVoteState = True
             # Nothing to do here, let's terminate after checking the votes
             if flUpdateVoteState:
-                super().updateVoteState()
+                updateVoteState()
             return
 
     def updateVoteState(self):
@@ -436,7 +436,7 @@ class MusicBot(discord.Client):
                 if((len(voicemembers)/len(self.voteShuffleList) >= self.votePercentage) and voteShuffleEnabled):
                     self.voteShuffle = True
     
-    def checkVoiceClient(self):
+    async def checkVoiceClient(self):
         if self.is_voice_connected(self.server):
             if(self.user.voice.voice_channel == self.voiceChannel):
                 if(len(self.voiceChannel.voice_members) == 1):
@@ -475,12 +475,12 @@ class MusicBot(discord.Client):
             if(self.userToken == None):
                 self.logger.critical("Token isn't defined, aborting")
                 return
-            await super().start(self.userToken)
+            super().run(self.userToken)
         else:
             if((self.userName == None) or (self.userPassword == None)):
                 self.logger.critical("Login credentials aren't defined, aborting")
                 return
-            await super().start(self.userName,self.userPassword)
+            super().run(self.userName,self.userPassword)
 
 class Youtube:
     def __init__(self, key=None):
@@ -628,7 +628,7 @@ class Config:
             self.logChannel = None
         if self.logChannel:
             self.logChannel = self.logChannel.split(",")
-            if(len(self.logChannel > 1) and (isinstance(self.voiceChannel, list) == True)):
+            if((len(self.logChannel) > 1) and (isinstance(self.voiceChannel, list) == True)):
                 self.logChannel = self.logChannel[0]
 
         # Use by default not a custom prefix, if true, use the configured one
@@ -669,7 +669,7 @@ class Config:
         self.votePercentage = config.getfloat("Voting", "votePercentage", fallback=0.75)
         
         # Hidden option, lets keep it that
-        self.addPlaylistEnabled = config.getboolean("Youtube", "addPlaylistEnabled", fallback=None)
+        self.addPlaylistEnabled = config.getboolean("Youtube", "addPlaylistEnabled", fallback=True)
 
         # Just make sure the config isn't missing any sections
         Config.update(self)
@@ -694,7 +694,8 @@ class Config:
         config.set("Administration", "googleAPI", "")
         config.set("Administration", "textChannel", "")
         config.set("Administration", "voiceChannel", "")
-        config.set("Administration", "logChannel", "") if self.logChannel else pass
+        if self.logChannel:
+            config.set("Administration", "logChannel", "")
         config.set("Administration", "usePrefix", "false")
         config.set("Administration", "prefix", "")
         config.set("Administration", "")
@@ -705,13 +706,16 @@ class Config:
         config.set("Bot", "gameType", "0")
         config.set("Bot", "")
 
+        config.add_section("Voting")
         config.set("Voting", "voteEnabled", "true")
         config.set("Voting", "voteSkipEnabled", "true")
         config.set("Voting", "voteShuffleEnabled", "true")
         config.set("Voting", "votePercentage", "0.75")
         
-        if self.addPlaylistEnabled:
+        # Someone has altered the settings. Return it back to normal but leave it in config this time 
+        if(self.addPlaylistEnabled == False):
             config.set("Voting", "")
+            config.add_section("Youtube")
             config.set("Youtube", "addPlaylist", "true")
 
     def update(self):
@@ -733,7 +737,8 @@ class Config:
         config.set("Administration", "googleAPI", self.googleAPI) if self.googleAPI else config.set("Administration", "googleAPI", "")
         config.set("Administration", "textChannel", self.textChannel) if self.textChannel else config.set("Administration", "textChannel", "")
         config.set("Administration", "voiceChannel", self.voiceChannel) if self.voiceChannel else config.set("Administration", "voiceChannel", "")
-        config.set("Administration", "logChannel", self.logChannel) if self.logChannel else pass
+        if self.logChannel:
+            config.set("Administration", "logChannel", self.logChannel)
         config.set("Administration", "usePrefix", "true") if (self.usePrefix == True) else config.set("Administration", "usePrefix", "false")
         config.set("Administration", "prefix", self.prefix) if self.prefix else config.set("Administration", "prefix", "")
         config.set("Administration", "")
@@ -744,16 +749,19 @@ class Config:
         config.set("Bot", "gameType", str(self.gameType)) if self.gameType else config.set("Bot", "gameType", "0")
         config.set("Bot", "")
 
-        config.set("Voting", "voteEnabled", self.voteEnabled) if (self.voteEnabled == False) else config.set("Playlist", "voteEnabled", "true")
-        config.set("Voting", "voteSkipEnabled", self.voteSkipEnabled) if (self.voteSkipEnabled == False) else config.set("Playlist", "voteSkipEnabled", "true")
-        config.set("Voting", "voteShuffleEnabled", self.voteShuffleEnabled) if (self.voteShuffleEnabled == False) else config.set("Playlist", "voteShuffleEnabled", "true")
-        config.set("Voting", "votePercentage", str(self.votePercentage)) if isinstance(self.votePercentage, float) else config.set("Playlist", "votePercentage", "0.75")
+        config.add_section("Voting")
+        config.set("Voting", "voteEnabled", self.voteEnabled) if (self.voteEnabled == False) else config.set("Voting", "voteEnabled", "true")
+        config.set("Voting", "voteSkipEnabled", self.voteSkipEnabled) if (self.voteSkipEnabled == False) else config.set("Voting", "voteSkipEnabled", "true")
+        config.set("Voting", "voteShuffleEnabled", self.voteShuffleEnabled) if (self.voteShuffleEnabled == False) else config.set("Voting", "voteShuffleEnabled", "true")
+        config.set("Voting", "votePercentage", str(self.votePercentage)) if isinstance(self.votePercentage, float) else config.set("Voting", "votePercentage", "0.75")
         config.set("Voting", "")
         
-        config.set("Youtube", "addPlaylistEnabled", self.addPlaylistEnabled) if (self.addPlaylist == False) else pass
+        if(self.addPlaylistEnabled == False):
+            config.add_section("Youtube")
+            config.set("Youtube", "addPlaylistEnabled", self.addPlaylistEnabled)
 
 class Embed:
-    def __init__(self, author=discord.Embed().Empty, title=discord.Embed().empty, url=discord.embed().empty, **kwargs):
+    def __init__(self, author=discord.Embed().Empty, title=discord.Embed().Empty, url=discord.Embed().Empty, **kwargs):
         self.embed = discord.Embed()
 
 bot = MusicBot()
