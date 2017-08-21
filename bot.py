@@ -146,7 +146,7 @@ class MusicBot(discord.Client):
         # Gotta make sure we can add lists depending on config
         self.googleAPI = self.config.googleAPI
         if self.googleAPI:
-            self.addPlaylist = self.config.addPlaylist
+            self.addPlaylist = self.config.addPlaylistEnabled
         else:
             self.addPlaylist = False
         
@@ -183,11 +183,13 @@ class MusicBot(discord.Client):
 #        self.logger.info("Loaded {amount} songs".format(amount=len(self.playList)) if len(self.playList) != 1 else self.logger.info("Loaded {amount} song".format(amount=len(self.playList))
         
         # We'll receive None if not found
-        self.textChannel = self.get_channel(self.textChannelId)
+        self.textChannel = list()
+        for channelId in self.textChannelId:
+            self.textChannel.append(self.get_channel(channelId))
         self.voiceChannel = self.get_channel(self.voiceChannelId)
         self.logChannel = self.get_channel(self.logChannelId)
         if self.textChannel:
-           self.server = self.textChannel.server
+           self.server = self.textChannel[0].server
 
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
@@ -218,6 +220,11 @@ class MusicBot(discord.Client):
             except IndexError:
                 await self.send_message(message.channel, "Something went wrong, please try again") 
             return
+        
+        if self.textChannel:
+            if not (message.channel in self.textChannel):
+                # It isn't the channel we configured
+                return
 
         # Remove first prefix or mention we checked
         try:
@@ -248,9 +255,7 @@ class MusicBot(discord.Client):
                 if ((message.author in self.mods) or (message.author in self.admins)):
                     try:
                         queuePos = int(content.split(' ', 1)[1])
-                        if queuePos == 0:
-                            queuePos += 1
-                            content = content.split(' ', 1)[0]
+                        content = content.split(' ', 1)[0]
                     except:
                         queuePos = len(self.playlist)
                         content = content.split(' ', 1)[0]
@@ -260,6 +265,9 @@ class MusicBot(discord.Client):
                     content = content.split(' ', 1)[0]
             else:
                 queuePos = len(self.playlist)
+            
+            if(queuePos <= 0):
+                queuePos = 1
             
             videoList = list()
             
@@ -275,7 +283,7 @@ class MusicBot(discord.Client):
                 elif(url["typeUrl"] == "list"):
                     self.logger.debug("Received list with id \"{id}\"".format(id=url["url"]))
                     if self.googleAPI:
-                        content = Youtube.getList(url["url"])
+                        content = self.youtube.getList(url["url"])
                         
                         # Received the content from the API, parse it for the id's
                         for video in content["items"]:
@@ -289,13 +297,13 @@ class MusicBot(discord.Client):
 
             for video in videoList:
                 if self.googleAPI:
-                    content = Youtube.getVideo(video)
+                    videoContent = self.youtube.getVideo(video)
                     
                     # We received nothing about this, abort this one
-                    if(content["pageInfo"]["totalResults"] == 0):
+                    if(videoContent["pageInfo"]["totalResults"] == 0):
                         continue
-                    videoInfo = content["items"][0]
-                    songList.append(Video(message.author, videoInfo["id"], title=videoInfo["snippet"]["title"], description=videoInfo["snippet"]["description"], duration=isodate.parse_time(videoInfo["contentDetails"]["duration"]).seconds, views=videoInfo["statistics"]["viewCount"]))
+                    videoInfo = videoContent["items"][0]
+                    songList.append(Video(message.author, videoInfo["id"], title=videoInfo["snippet"]["title"], description=videoInfo["snippet"]["description"], duration=isodate.parse_duration(videoInfo["contentDetails"]["duration"]).seconds, views=videoInfo["statistics"]["viewCount"]))
                 else:
                     songList.append(Video(message.author, video))
             
@@ -333,7 +341,7 @@ class MusicBot(discord.Client):
                     self.player.start()
                     # We're gonna exend this with embeds once things work
                     if (self.playlist[0].title != None):
-                        await self.send_message(message.channel, "Started playing {song}, duration: {duration}".format(song=self.playlist[0].title, duration=str(datetime.timedelta(seconds=self.playlist[0].duration))))
+                        await self.send_message(message.channel, "Started playing {song}, duration: {duration}".format(song=self.playlist[0].title, duration=self.playlist[0].duration)))
                     else:
                         await self.send_message(message.channel, "Started playing {song}, duration: {duration}".format(song=self.player.title, duration=str(datetime.timedelta(seconds=self.player.duration))))
                     # Keep checking if something happened with the votes
@@ -372,7 +380,8 @@ class MusicBot(discord.Client):
 
             content = content.replace("eval ", "", 1)
             # Censor private info from anyone
-            if ("self.email" or "self.password" or "self.token" or "self.config.email" or "self.config.password" or "self.config.token") in content:
+            censored = ["self.email", "self.password", "self.token", "self.config.email", "self.config.password", "self.config.token", "self.googleAPI", "self.config.googleAPI"]
+            if any(word in content for word in censored):
                 await self.send_message(message.channel, "`Censored due to private info`")
                 return
             try:
@@ -422,7 +431,7 @@ class MusicBot(discord.Client):
 
     def updateVoteState(self):
         if self.is_voice_connected(self.server):
-            if(self.user.voice.voice_channel == self.voiceChannel):
+            if(list(self.voice_clients)[0] == self.voiceChannel):
                 voiceMembers = list()
                 # Check if 75% of the voice members matching the criteria has voted
                 for member in self.voiceChannel.voice_members:
@@ -437,21 +446,20 @@ class MusicBot(discord.Client):
                     self.voteShuffle = True
     
     async def checkVoiceClient(self):
-        if self.is_voice_connected(self.server):
-            if(self.user.voice.voice_channel == self.voiceChannel):
-                if(len(self.voiceChannel.voice_members) == 1):
+        if(len(self.voiceChannel.voice_members) >= 1):
+            if self.is_voice_connected(self.server):
+                if(list(self.voice_clients)[0].channel == self.voiceChannel):
+                    if(len(self.voiceChannel.voice_members) >= 2):
+                        return
                     self.voiceClient = self.voice_client_in(self.server)
                     await self.voiceClient.disconnect()
                     self.voiceClient = None
                 else:
-                    # Nothing to be concerned about, resume earlier code
-                    return
+                    # Guess we got moved, lets go back
+                    await self.move_to(self.voiceChannel)
+                    self.voiceClient = self.voice_client_in(self.server)
             else:
-                # Guess we got moved, lets go back
-                await self.move_to(self.voiceChannel)
-                self.voiceClient = self.voice_client_in(self.server)
-        else:
-            self.voiceClient = await self.join_voice_channel(self.voiceChannel)
+                self.voiceClient = await self.join_voice_channel(self.voiceChannel)
 
     async def on_server_join(self, server):
         if(self.textChannel == None):
@@ -517,8 +525,12 @@ class Video:
         self.url = url
         self.title = title
         self.description = description
-        self.duration = duration
+        self._duration = duration
         self.views = views
+    
+    @property
+    def duration(self):
+        return str(datetime.timedelta(seconds=self._duration))
 
 class Config:
     def __init__(self, file):
@@ -619,17 +631,16 @@ class Config:
         if self.voiceChannel == "":
             self.voiceChannel = None
         if self.voiceChannel:
+            # Make sure we got only the first element
             self.voiceChannel = self.voiceChannel.split(",")
-            if(len(self.voiceChannel > 1) and (isinstance(self.voiceChannel, list) == True)):
-                self.voiceChannel = self.voiceChannel[0]
+            self.voiceChannel = self.voiceChannel[0]
         
         self.logChannel = config.get("Administration", "logChannel", fallback=None)
         if self.logChannel == "":
             self.logChannel = None
         if self.logChannel:
             self.logChannel = self.logChannel.split(",")
-            if((len(self.logChannel) > 1) and (isinstance(self.voiceChannel, list) == True)):
-                self.logChannel = self.logChannel[0]
+            self.logChannel = self.logChannel[0]
 
         # Use by default not a custom prefix, if true, use the configured one
         self.usePrefix = config.getboolean("Administration", "usePrefix", fallback=False)
@@ -694,8 +705,11 @@ class Config:
         config.set("Administration", "googleAPI", "")
         config.set("Administration", "textChannel", "")
         config.set("Administration", "voiceChannel", "")
-        if self.logChannel:
-            config.set("Administration", "logChannel", "")
+        try:
+            if self.logChannel:
+                config.set("Administration", "logChannel", "")
+        except AttributeError:
+            pass
         config.set("Administration", "usePrefix", "false")
         config.set("Administration", "prefix", "")
         config.set("Administration", "")
@@ -712,11 +726,17 @@ class Config:
         config.set("Voting", "voteShuffleEnabled", "true")
         config.set("Voting", "votePercentage", "0.75")
         
-        # Someone has altered the settings. Return it back to normal but leave it in config this time 
-        if(self.addPlaylistEnabled == False):
-            config.set("Voting", "")
-            config.add_section("Youtube")
-            config.set("Youtube", "addPlaylist", "true")
+        # Someone has altered the settings. Return it back to normal but leave it in config this time
+        try:
+            if(self.addPlaylistEnabled == False):
+                config.set("Voting", "")
+                config.add_section("Youtube")
+                config.set("Youtube", "addPlaylist", "true")
+        except AttributeError:
+            pass
+        
+        with open(self.file, "w", encoding="utf-8") as file:
+            config.write(file)
 
     def update(self):
         config = configparser.ConfigParser(allow_no_value=True)
@@ -730,12 +750,12 @@ class Config:
         config.set("Auth", "")
 
         config.add_section("Administration")
-        config.set("Administration", "; Split admins/mods using \",\" don't use spaces. To grant access use the id of the user you wish to add.")
-        config.set("Administration", "Administrator", self.admin) if self.admin else config.set("Administration", "Administrator", "")
-        config.set("Administration", "Moderator", self.mod) if self.mod else config.set("Administration", "Moderator", "")
-        config.set("Administration", "")
+        config.set("Administration", "; Split admins/mods using \",\", don't use spaces. To grant access use the id of the user you wish to add.")
+        config.set("Administration", "Administrator", ",".join(self.admin)) if self.admin else config.set("Administration", "Administrator", "")
+        config.set("Administration", "Moderator", ",".join(self.mod)) if self.mod else config.set("Administration", "Moderator", "")
+        config.set("Administration", "; Split textChannel also using \",\", don't use spaces.")
         config.set("Administration", "googleAPI", self.googleAPI) if self.googleAPI else config.set("Administration", "googleAPI", "")
-        config.set("Administration", "textChannel", self.textChannel) if self.textChannel else config.set("Administration", "textChannel", "")
+        config.set("Administration", "textChannel", ",".join(self.textChannel)) if self.textChannel else config.set("Administration", "textChannel", "")
         config.set("Administration", "voiceChannel", self.voiceChannel) if self.voiceChannel else config.set("Administration", "voiceChannel", "")
         if self.logChannel:
             config.set("Administration", "logChannel", self.logChannel)
@@ -759,6 +779,9 @@ class Config:
         if(self.addPlaylistEnabled == False):
             config.add_section("Youtube")
             config.set("Youtube", "addPlaylistEnabled", self.addPlaylistEnabled)
+            
+        with open(self.file, "w", encoding="utf-8") as file:
+            config.write(file)
 
 class Embed:
     def __init__(self, author=discord.Embed().Empty, title=discord.Embed().Empty, url=discord.Embed().Empty, **kwargs):
