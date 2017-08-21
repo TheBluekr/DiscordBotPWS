@@ -1,8 +1,10 @@
-version = "0.0.1c"
+version = "0.0.2a"
 
 # To-Do:
-# Extend property list at Video class
-# Add API requests at Youtube class
+# Extend property list at Video class (done?)
+# Add API requests at Youtube class (done?)
+# Add a function to make the bot the author of the song when the original author can't be retrieved
+# Add embeds to messages when songs play (low priority)
 # Add exceptionMessage() to get custom error messages for both console and discord (later)
 # Define setup event when joining server
 # Take current create_ytdl_player function from discord.py and use it on local level (prepare for rewrite)
@@ -17,6 +19,8 @@ import datetime
 import urllib.parse
 import traceback
 import random
+import isodate
+import requests
 
 # Declare global vars
 
@@ -138,8 +142,13 @@ class MusicBot(discord.Client):
             self.logger.info("Voting disabled")
             self.voteSkipEnabled = False
             self.voteShuffleEnabled = False
-            
+        
+        # Gotta make sure we can add lists depending on config
         self.googleAPI = self.config.googleAPI
+        if self.googleAPI:
+            self.addPlaylist = self.config.addPlaylist
+        else:
+            self.addPlaylist = False
         
         self.youtube = Youtube(self.googleAPI)
 
@@ -189,9 +198,15 @@ class MusicBot(discord.Client):
             # It wasn't us who got tagged first, just ignore it I guess
             if(message.raw_mentions[0] != self.user.id):
                 return
+            # Check if the bot was tagged first
+            if not message.startswith(self.user.mention)):
+                return
         elif((self.flagUsePrefix == True) and (self.prefix != None)):
             if(not message.content.startswith(self.prefix)):
                 return
+        elif(message.author == self.user):
+            # The bot shouldn't handle his own messages
+            return
         else:
             # If neither of these match, propably something went wrong in the config
             self.logger.error("The prefix isn't configured correctly! Updating config to default mention")
@@ -199,7 +214,7 @@ class MusicBot(discord.Client):
             self.flagUsePrefix = False
             self.config.update()
             try:
-                await self.send_message(message.channel, "Something went wrong, please try again using \n{prefix} {content}```".format(prefix=self.user.mention, content = message.content.split(' ', 1)[1]))
+                await self.send_message(message.channel, "Something went wrong, please try again using \n{prefix} {content}```".format(prefix=self.user.mention, content=message.content.split(' ', 1)[1]))
             except IndexError:
                 await self.send_message(message.channel, "Something went wrong, please try again") 
             return
@@ -215,7 +230,7 @@ class MusicBot(discord.Client):
         # We want to make sure there's something after the add, it can't be empty right?
         if content.startswith("add"):
             if content.strip() == "add":
-                self.logger.error("No arguments were passed after \"add\", aborting")
+                self.logger.error("{user} ({id}: No arguments were passed after \"add\", aborting".format(user=message.author.name, id=message.author.id))
                 await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} add <URL / id>\"```".format(prefix=self.formatPrefix)))
                 return
 
@@ -246,8 +261,7 @@ class MusicBot(discord.Client):
             else:
                 queuePos = len(self.playlist)
             
-            songList = list()
-            song = list()
+            videoList = list()
             
             # Add support for complete playlists if we have the API
             # It could happen we had an shortened one so we can't take full link
@@ -257,33 +271,42 @@ class MusicBot(discord.Client):
                 url = self.youtube.parse(content)
                 if(url["typeUrl"] == "video"):
                     self.logger.debug("Received video with id \"{id}\"".format(id=url["url"]))
+                    videoList.append(url["url"])
                 elif(url["typeUrl"] == "list"):
                     self.logger.debug("Received list with id \"{id}\"".format(id=url["url"]))
-                # Add youtube API requests here
-                # <code>
-                if (url["typeUrl"] == "video"):
-                    #if (self.googleAPI):
-                    if (False):
-                        pass
-                        # Add code for retrieving info from Youtube
+                    if self.googleAPI:
+                        content = Youtube.getList(url["url"])
+                        
+                        # Received the content from the API, parse it for the id's
+                        for video in content["items"]:
+                            videoList.append(video["snippet"]["resourceId"]["videoId"]))
                     else:
-                        song.append(url["url"])
-                        song.append(message.author.id)
-                        songList.append(song)
-                elif(url["typeUrl"] == "list"):
-                    await self.send_message(message.channel, "Lists adding isn't supported... for now")
+                        self.send_message(message.channel, "List adding is disabled \nPlease contact the host if looking to enable this")
+                        return
+            
+            songList = list()
+            
+
+            for video in videoList:
+                if self.googleAPI:
+                    content = Youtube.getVideo(video)
+                    
+                    # We received nothing about this, abort this one
+                    if(content["pageInfo"]["totalResults"] == 0):
+                        continue
+                    videoInfo = content["items"][0]
+                    songList.append(Video(message.author, videoInfo["id"], title=videoInfo["snippet"]["title"], description=videoInfo["snippet"]["description"], duration=isodate.parse_time(videoInfo["contentDetails"]["duration"]).seconds, views=videoInfo["statistics"]["viewCount"]))
                 else:
-                    # We'll receive an unknown typeUrl when googleAPI isn't configured
-                    pass
-                
-            # Easy method to parse multiple songs in case, not efficient for 1 only
+                    songList.append(Video(message.author, video))
+            
+            # Easy method to parse multiple songs in case, not efficient for 1 only though
             for song in songList:
                 self.playlist.insert(queuePos+songList.index(song), song)
-            if(len(songList) == 1):
-                if(len(song) == 2):
-                    await self.send_message(message.channel, "Added {url} at position {pos}".format(url=song[0], pos=queuePos))
-                else:
-                    await self.send_message(message.channel, "Added {song} at position {pos}".format(song=None, pos=queuePos))
+                if(len(songList) == 1):
+                    if(song.title):
+                        await self.send_message(message.channel, "Added {song} (\"{url}\") at position {pos}".format(song=song.title, url=song.url, pos=queuePos))
+                    else:
+                        await self.send_message(message.channel, "Added {url} at position {pos}".format(url=song.url, pos=queuePos))
 
         if content.startswith("play"):
             if len(self.playlist) == 0:
@@ -293,25 +316,27 @@ class MusicBot(discord.Client):
                 if(self.user.voice.voice_channel != self.voiceChannel):
                     return
                 while len(self.playlist > 0):
-                    # We've got 3 elements in the list when the API was used and an author which added it
-                    if(len(self.playlist[0]) == 4):
-                        self.logger.debug("Preparing {song} (\"{id}\", \"{duration}\"), added by {author} (\"{authorId}\")".format(song=self.playlist[0][1], id=self.playlist[0][0], duration=self.playlist[0][2], author=self.get_member(self.playlist[0][3]), authorId=self.playlist[0][3]))
+                    # We've got an Video object with more attribs if API was used
+                    if(self.playlist[0].title != None):
+                        self.logger.debug("{author} ({id}): Preparing {song} (\"{url}\", \"{duration}\"))".format(author=self.playlist[0].user.name, id=self.playlist[0].user.id, song=self.playlist[0].title, url=self.playlist[0].url))
                     else:
-                        self.logger.debug("Preparing song (\"{id}\"), added by {author} (\"{authorId}\")".format(id=self.playlist[0][0], author=self.get_member(self.playlist[0][3]), authorId=self.playlist[0][3]))
+                        self.logger.debug("{author} ({id}): Preparing song (\"{url}\")".format(author=self.playlist[0].user.name, id=self.playlist[0].user.id, url=self.playlist[0].url))
                     self.voteSkip = False
                     self.voteShuffle = False
-                    self.player = await self.voiceClient.create_ytdl_player(self.playlist[0][0])
-                    # Based on API we should receive None when youtube-dl fails to extract info
+                    self.player = await self.voiceClient.create_ytdl_player(self.playlist[0].url)
+                    # Based on Discord.py API we should receive None when youtube-dl fails to extract info
                     if self.player.title == None:
-                        self.logger.error("Youtube-dl failed to extract info from \"{title}\"".format(title=self.playlist[0][0]))
+                        self.logger.error("Youtube-dl failed to extract info from \"{url}\"".format(title=self.playlist[0].url))
                         del self.playlist[0]
                         continue
                     self.player.volume = self.playerVolume
                     self.player.start()
-                    if (len(self.playlist[0]) == 4):
-                        await self.send_message(message.channel, "Started playing {song}".format(song=self.player.title))
+                    # We're gonna exend this with embeds once things work
+                    if (self.playlist[0].title != None):
+                        await self.send_message(message.channel, "Started playing {song}, duration: {duration}".format(song=self.playlist[0].title, duration=str(datetime.timedelta(seconds=self.playlist[0].duration))))
                     else:
-                        await self.send_message(message.channel, "Started playing {song}".format(song=self.playlist[0][1]))
+                        await self.send_message(message.channel, "Started playing {song}, duration: {duration}".format(song=self.player.title, duration=str(datetime.timedelta(seconds=self.player.duration))))
+                    # Keep checking if something happened with the votes
                     while(self.player.is_playing() and not self.player.is_done()):
                         await asyncio.sleep(1)
                         if(self.voteShuffle):
@@ -460,12 +485,19 @@ class MusicBot(discord.Client):
 class Youtube:
     def __init__(self, key=None):
         self.key = key
+        apiBase = "https://www.googleapis.com/"
+        apiYoutube = apiBase+"youtube/v3/"
+        self.apiYoutubeVideos = apiYoutube+"videos?key={key}&part=snippet,contentDetails,status,statistics&id={id}"
+        self.apiYoutubeVideoSearch = apiYoutube+"search?key={key}&part=snippet&type=video&q={searchQuery}"
+        self.apiYoutubeLists = apiYoutube+"playlistItems?key={key}&part=snippet,contentDetails,statistics&maxResults=50&playlistId={id}"
         
-    def getList(self, list):
-        pass
+    def getList(self, playlist):
+        request = requests.get(self.apiYoutubeLists.format(id=playlist))
+        return request.json()
     
     def getVideo(self, video):
-        pass
+        request = requests.get(self.apiYoutubeVideos.format(id=video))
+        return request.json()
 
     def parse(self, url):
         # Use this if we get a https://www.youtube.com/ link
@@ -480,12 +512,13 @@ class Youtube:
 
 # Storing info from videos
 class Video:
-    def __init__(self, url, title=None, duration=None, views=None, region=None):
+    def __init__(self, user, url, title=None, description=None, duration=None, views=None):
+        self.user = user
         self.url = url
         self.title = title
+        self.description = description
         self.duration = duration
         self.views = views
-        self.region = region
 
 class Config:
     def __init__(self, file):
@@ -630,10 +663,13 @@ class Config:
             else:
                 self.logger.info("Loaded game \"{name}\"".format(name=self.gameName))
 
-        self.voteEnabled = config.getboolean("Voting", "voteEnabled")
-        self.voteSkipEnabled = config.getboolean("Voting", "voteSkipEnabled")
-        self.voteShuffleEnabled = config.getboolean("Voting", "voteShuffleEnabled")
-        self.votePercentage = config.getfloat("Voting", "votePercentage")
+        self.voteEnabled = config.getboolean("Voting", "voteEnabled", fallback=True)
+        self.voteSkipEnabled = config.getboolean("Voting", "voteSkipEnabled", fallback=True)
+        self.voteShuffleEnabled = config.getboolean("Voting", "voteShuffleEnabled", fallback=True)
+        self.votePercentage = config.getfloat("Voting", "votePercentage", fallback=0.75)
+        
+        # Hidden option, lets keep it that
+        self.addPlaylistEnabled = config.getboolean("Youtube", "addPlaylistEnabled", fallback=None)
 
         # Just make sure the config isn't missing any sections
         Config.update(self)
@@ -667,11 +703,16 @@ class Config:
         config.set("Bot", "gameName", "")
         config.set("Bot", "gameUrl", "https://wwww.twitch.tv/logout")
         config.set("Bot", "gameType", "0")
+        config.set("Bot", "")
 
         config.set("Voting", "voteEnabled", "true")
         config.set("Voting", "voteSkipEnabled", "true")
         config.set("Voting", "voteShuffleEnabled", "true")
         config.set("Voting", "votePercentage", "0.75")
+        
+        if self.addPlaylistEnabled:
+            config.set("Voting", "")
+            config.set("Youtube", "addPlaylist", "true")
 
     def update(self):
         config = configparser.ConfigParser(allow_no_value=True)
@@ -707,14 +748,13 @@ class Config:
         config.set("Voting", "voteSkipEnabled", self.voteSkipEnabled) if (self.voteSkipEnabled == False) else config.set("Playlist", "voteSkipEnabled", "true")
         config.set("Voting", "voteShuffleEnabled", self.voteShuffleEnabled) if (self.voteShuffleEnabled == False) else config.set("Playlist", "voteShuffleEnabled", "true")
         config.set("Voting", "votePercentage", str(self.votePercentage)) if isinstance(self.votePercentage, float) else config.set("Playlist", "votePercentage", "0.75")
+        config.set("Voting", "")
+        
+        config.set("Youtube", "addPlaylistEnabled", self.addPlaylistEnabled) if (self.addPlaylist == False) else pass
 
 class Embed:
-    def __init__(self, author=None, title=None, url=None, **kwargs):
-        pass
-
-    def embed(self):
-        embed = discord.Embed()
-        return None # For now
+    def __init__(self, author=discord.Embed().Empty, title=discord.Embed().empty, url=discord.embed().empty, **kwargs):
+        self.embed = discord.Embed()
 
 bot = MusicBot()
 bot.run()
