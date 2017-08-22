@@ -188,6 +188,7 @@ class MusicBot(discord.Client):
             self.textChannel.append(self.get_channel(channelId))
         self.voiceChannel = self.get_channel(self.voiceChannelId)
         self.logChannel = self.get_channel(self.logChannelId)
+        # Take server we got from first channel (this should be the main server)
         if self.textChannel:
            self.server = self.textChannel[0].server
 
@@ -267,7 +268,7 @@ class MusicBot(discord.Client):
                 queuePos = len(self.playlist)
             
             if(queuePos <= 0):
-                queuePos = 1
+                queuePos = 0
             
             videoList = list()
             
@@ -309,6 +310,7 @@ class MusicBot(discord.Client):
             
             # Easy method to parse multiple songs in case, not efficient for 1 only though
             for song in songList:
+                queuePos += 1
                 self.playlist.insert(queuePos+songList.index(song), song)
                 if(len(songList) == 1):
                     if(song.title):
@@ -341,7 +343,7 @@ class MusicBot(discord.Client):
                     self.player.start()
                     # We're gonna exend this with embeds once things work
                     if (self.playlist[0].title != None):
-                        await self.send_message(message.channel, "Started playing {song}, duration: {duration}".format(song=self.playlist[0].title, duration=self.playlist[0].duration)))
+                        await self.send_message(message.channel, "Started playing {song}, duration: {duration}".format(song=self.playlist[0].title, duration=self.playlist[0].duration))
                     else:
                         await self.send_message(message.channel, "Started playing {song}, duration: {duration}".format(song=self.player.title, duration=str(datetime.timedelta(seconds=self.player.duration))))
                     # Keep checking if something happened with the votes
@@ -350,10 +352,10 @@ class MusicBot(discord.Client):
                         if(self.voteShuffle):
                             if(len(self.playlist) > 2):
                                 # We want to make sure we're not going to repeat our current song
-                                self.song = self.playlist[0]
+                                song = self.playlist[0]
                                 del self.playlist[0]
                                 random.shuffle(self.playlist)
-                                self.playlist.insert(0, self.song)
+                                self.playlist.insert(0, song)
                                 self.voteShuffleList = list()
                                 self.voteShuffle = False
                                 await self.send_message(message.channel, "Shuffling playlist")
@@ -365,7 +367,7 @@ class MusicBot(discord.Client):
                             self.voteSkipList = list()
                             self.voteSkip = False
                             await self.send_message(message.channel, "Skipping current song")
-                            break
+                            self.player.stop()
                     # Prevent further things from happening at other commands
                     self.player = None
                     self.voteSkipList = list()
@@ -398,7 +400,7 @@ class MusicBot(discord.Client):
     async def on_voice_state_update(self, memberBefore, memberAfter):
         # Process voicestate updates from clients connected to voicechannel
         updateVoteState = False
-        await checkVoiceClient()
+        await self.checkVoiceClient()
         if((memberBefore.voice.voice_channel != self.voiceChannel) or (memberAfter.voice.voice_channel != self.voiceChannel)):
             return
             # We don't want to parse voicechannel info which doesn't involve us
@@ -426,7 +428,7 @@ class MusicBot(discord.Client):
                 flUpdateVoteState = True
             # Nothing to do here, let's terminate after checking the votes
             if flUpdateVoteState:
-                updateVoteState()
+                self.updateVoteState()
             return
 
     def updateVoteState(self):
@@ -500,11 +502,11 @@ class Youtube:
         self.apiYoutubeLists = apiYoutube+"playlistItems?key={key}&part=snippet,contentDetails,statistics&maxResults=50&playlistId={id}"
         
     def getList(self, playlist):
-        request = requests.get(self.apiYoutubeLists.format(id=playlist))
+        request = requests.get(self.apiYoutubeLists.format(key=self.key, id=playlist))
         return request.json()
     
     def getVideo(self, video):
-        request = requests.get(self.apiYoutubeVideos.format(id=video))
+        request = requests.get(self.apiYoutubeVideos.format(key=self.key, id=video))
         return request.json()
 
     def parse(self, url):
@@ -521,16 +523,37 @@ class Youtube:
 # Storing info from videos
 class Video:
     def __init__(self, user, url, title=None, description=None, duration=None, views=None):
-        self.user = user
-        self.url = url
-        self.title = title
-        self.description = description
+        self._user = user
+        self._url = url
+        self._title = title
+        self._description = description
         self._duration = duration
-        self.views = views
+        self._views = views
+
+    # Return other formats when calling main values
+    @property
+    def user(self):
+        return self._user
+    
+    @property
+    def url(self):
+        return self._url
+    
+    @property
+    def title(self):
+        return self._title
+    
+    @property
+    def description(self):
+        return self._description
     
     @property
     def duration(self):
         return str(datetime.timedelta(seconds=self._duration))
+    
+    @property
+    def views(self):
+        return self._views
 
 class Config:
     def __init__(self, file):
