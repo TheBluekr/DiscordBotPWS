@@ -1,4 +1,4 @@
-version = "0.0.2a-Hotfix-1"
+version = "0.0.2a-Hotfix-4"
 
 # To-Do:
 # Extend property list at Video class (done?)
@@ -191,6 +191,9 @@ class MusicBot(discord.Client):
         # Take server we got from first channel (this should be the main server)
         if self.textChannel:
            self.server = self.textChannel[0].server
+        
+        if(self.server.me.nick):
+            self.logger.info("Nickname \"{prefix}\" found".format(prefix=self.server.me.nick))
 
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
@@ -201,8 +204,8 @@ class MusicBot(discord.Client):
             # It wasn't us who got tagged first, just ignore it I guess
             if(message.raw_mentions[0] != self.user.id):
                 return
-            # Check if the bot was tagged first
-            if not message.content.startswith(self.user.mention):
+            # Check if the bot was tagged first, workaround method also for when a nick is used
+            if not (message.content.startswith("<@{id}>".format(id=self.user.id)) or message.content.startswith("<@!{id}>".format(id=self.user.id))):
                 return
         elif((self.flagUsePrefix == True) and (self.prefix != None)):
             if(not message.content.startswith(self.prefix)):
