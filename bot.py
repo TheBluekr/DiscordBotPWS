@@ -1,4 +1,4 @@
-version = "0.0.2a-Hotfix-4"
+version = "0.0.3a"
 
 # To-Do:
 # Extend property list at Video class (done?)
@@ -21,6 +21,8 @@ import traceback
 import random
 import isodate
 import requests
+import json
+import math
 
 # Declare global vars
 
@@ -70,10 +72,15 @@ class MusicBot(discord.Client):
         
         # Try load all songs we got from earlier
         try:
-            self.playlist = json.load(self.fPlaylist, "r")
-        except:
+            with open(self.fPlaylist, "r") as file:
+                self.playlist = json.load(file)
+        except ValueError:
             # Either file has a mistake in indentations, has been corrupted or didn't exist. Let's create a new one later
             self.playlist = list()
+        except FileNotFoundError:
+            with open(self.fPlaylist, "w") as file:
+                json.dump(list(), file)
+                self.playlist = list()
 
         # Get auth
         if self.config.useToken:
@@ -166,34 +173,46 @@ class MusicBot(discord.Client):
         
         self.formatPrefix = self.user if not self.flagUsePrefix else self.prefix
         self.logger.info("Prefix set to \"{prefix}\"".format(prefix=self.formatPrefix))
-
-#        if self.config.googleAPI:
-#            for song in self.playListUrl:
-#                # Let's retrieve all info we got, we'll receive None for title or duration if something went wrong
-#                video = self.youtube.getVideo(song)
-#                if(video.title and video.duration):
-#                    self.playList.append([video.url, video.title, video.duration])
-#                elif(video.url):
-#                    self.playList.append([video.url])
-#                else:
-#                    self.logger.warning("Couldn't retrieve any info about \"{url}\", is this video private or removed?")
-#        else:
-#            for song in self.playListUrl:
-#                self.playList.append([song])
-#        self.logger.info("Loaded {amount} songs".format(amount=len(self.playList)) if len(self.playList) != 1 else self.logger.info("Loaded {amount} song".format(amount=len(self.playList))
         
-        # We'll receive None if not found
+        # We'll receive None if not found at self.get_channel()
+        # We'll also receive an empty list at channelId when it's empty
         self.textChannel = list()
         for channelId in self.textChannelId:
             self.textChannel.append(self.get_channel(channelId))
         self.voiceChannel = self.get_channel(self.voiceChannelId)
         self.logChannel = self.get_channel(self.logChannelId)
         # Take server we got from first channel (this should be the main server)
-        if self.textChannel:
-           self.server = self.textChannel[0].server
-        
-        if(self.server.me.nick):
-            self.logger.info("Nickname \"{prefix}\" found".format(prefix=self.server.me.nick))
+        if(len(self.textChannel) > 0):
+            self.server = self.textChannel[0].server
+            if(self.server.me.nick):
+                self.logger.info("Nickname \"{prefix}\" found".format(prefix=self.server.me.nick))
+        else:
+            self.logger.debug("Failed to retrieve main server, channel isn't defined in config")
+            self.server = list(self.servers)[0]
+            if(self.server.me.nick):
+                self.logger.info("Nickname \"{prefix}\" found".format(prefix=self.server.me.nick))
+
+        # Override elements in current playlist to support more info
+        songList = list()
+        for song in self.playlist:
+            user = await self.get_user_info(song[1])
+
+            if(self.googleAPI):
+                videoContent = self.youtube.getVideo(song[0])
+
+                if(videoContent["pageInfo"]["totalResults"] == 0):
+                    continue
+
+                videoInfo = videoContent["items"][0]
+                songList.append(Video(user, videoInfo["id"], title=videoInfo["snippet"]["title"], description=videoInfo["snippet"]["description"], duration=isodate.parse_duration(videoInfo["contentDetails"]["duration"]).seconds, views=videoInfo["statistics"]["viewCount"]))
+            else:
+                songList.append(Video(user, song[0]))
+            # Update this to current playlist
+            self.playlist = songList
+            self.logger.info("Loaded {number} song(s)".format(number=len(self.playlist)))
+
+        self.voiceClient = await self.join_voice_channel(self.voiceChannel)
+            
 
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
@@ -208,7 +227,7 @@ class MusicBot(discord.Client):
             if not (message.content.startswith("<@{id}>".format(id=self.user.id)) or message.content.startswith("<@!{id}>".format(id=self.user.id))):
                 return
         elif((self.flagUsePrefix == True) and (self.prefix != None)):
-            if(not message.content.startswith(self.prefix)):
+            if not message.content.startswith(self.prefix):
                 return
         elif(message.author == self.user):
             # The bot shouldn't handle his own messages
@@ -220,20 +239,21 @@ class MusicBot(discord.Client):
             self.flagUsePrefix = False
             self.config.update()
             try:
-                await self.send_message(message.channel, "Something went wrong, please try again using \n{prefix} {content}```".format(prefix=self.user.mention, content=message.content.split(' ', 1)[1]))
+                if not self.prefix:
+                    await self.send_message(message.channel, "Something went wrong, please try again using \n{prefix} {content}```".format(prefix=self.user.mention, content=message.content.split(' ', 1)[1]))
+                else:
+                    await self.send_message(message.channel, "Something went wrong, please try again using \n{prefix}{content}```".format(prefix=self.user.mention, content=message.content.split(' ', 1)[1]))
             except IndexError:
                 await self.send_message(message.channel, "Something went wrong, please try again") 
             return
-        
-        if self.textChannel:
-            if not (message.channel in self.textChannel):
-                # It isn't the channel we configured
-                return
 
         # Remove first prefix or mention we checked
         try:
             # Credits to Plue for informing me about this method
-            content = message.content.split(' ', 1)[1]
+            if not self.prefix:
+                content = message.content.split(" ", 1)[1]
+            else:
+                content = message.content.replace(self.prefix, "", 1)
         except IndexError:
             return
             # In case we only mention the bot or use a prefix it can create exceptions
@@ -250,7 +270,9 @@ class MusicBot(discord.Client):
             # Want to make sure we're getting the int as last
             try:
                 int(content.split(' ', 1)[0])
-                content = content.split(' ', 1).reverse()
+                content = content.split(' ', 1)
+                content.reverse()
+                content = " ".join(content)
             except ValueError:
                 pass
             
@@ -282,19 +304,24 @@ class MusicBot(discord.Client):
                 # We declared youtube class at __init__, let's call it again with a key registered
                 url = self.youtube.parse(content)
                 if(url["typeUrl"] == "video"):
-                    self.logger.debug("Received video with id \"{id}\"".format(id=url["url"]))
+                    self.logger.info("Received video with id \"{id}\"".format(id=url["url"]))
                     videoList.append(url["url"])
                 elif(url["typeUrl"] == "list"):
-                    self.logger.debug("Received list with id \"{id}\"".format(id=url["url"]))
+                    self.logger.info("Received list with id \"{id}\"".format(id=url["url"]))
                     if self.googleAPI:
-                        content = self.youtube.getList(url["url"])
+                        response = self.youtube.getList(url["url"])
+                        if "error" in response.keys():
+                            await self.send_message(message.channel, "Something went wrong during retrieving the playlist \nReceived the following response: \n```{message}```".format(message=content["error"]["message"]))
+                            return
                         
                         # Received the content from the API, parse it for the id's
-                        for video in content["items"]:
+                        for video in response["items"]:
                             videoList.append(video["snippet"]["resourceId"]["videoId"])
                     else:
                         self.send_message(message.channel, "List adding is disabled \nPlease contact the host if looking to enable this")
                         return
+            else:
+                videoList.append(content)
             
             songList = list()
             
@@ -307,8 +334,10 @@ class MusicBot(discord.Client):
                     if(videoContent["pageInfo"]["totalResults"] == 0):
                         continue
                     videoInfo = videoContent["items"][0]
+                    self.logger.info("Added {title} ({id})".format(title=videoInfo["snippet"]["title"], id=videoInfo["id"]))
                     songList.append(Video(message.author, videoInfo["id"], title=videoInfo["snippet"]["title"], description=videoInfo["snippet"]["description"], duration=isodate.parse_duration(videoInfo["contentDetails"]["duration"]).seconds, views=videoInfo["statistics"]["viewCount"]))
                 else:
+                    self.logger.info("Added {url}".format(title=video))
                     songList.append(Video(message.author, video))
             
             # Easy method to parse multiple songs in case, not efficient for 1 only though
@@ -317,21 +346,34 @@ class MusicBot(discord.Client):
                 self.playlist.insert(queuePos+songList.index(song), song)
                 if(len(songList) == 1):
                     if(song.title):
-                        await self.send_message(message.channel, "Added {song} (\"{url}\") at position {pos}".format(song=song.title, url=song.url, pos=queuePos))
+                        await self.send_message(message.channel, "Added {song} at position {pos}".format(song=song.title, url=song.url, pos=queuePos))
                     else:
                         await self.send_message(message.channel, "Added {url} at position {pos}".format(url=song.url, pos=queuePos))
+
+            # Update playlist file to current playlist (not efficient)
+            songList = list()
+            for song in self.playlist:
+                songList.append([song.url, song.user.id])
+            with open(self.fPlaylist, "w", encoding="utf-8") as file:
+                json.dump(songList, file)
 
         if content.startswith("play"):
             if len(self.playlist) == 0:
                 await self.send_message(message.channel, "Playlist is empty")
                 return
             if self.is_voice_connected(self.server):
-                if(self.user.voice.voice_channel != self.voiceChannel):
+                if(self.voiceClient.channel != self.voiceChannel):
                     return
-                while len(self.playlist > 0):
+                if(self.player):
+                    await self.send_message(message.channel, "The player is already active {author} !\nJoin `{voice}` channel to tune in".format(author=message.author.mention, voice=self.voiceChannel.name))
+                    return
+                while(len(self.playlist) > 0):
+                    # Some bizarre bug makes this continue
+                    if(len(self.playlist) == 0):
+                        return
                     # We've got an Video object with more attribs if API was used
                     if(self.playlist[0].title != None):
-                        self.logger.debug("{author} ({id}): Preparing {song} (\"{url}\", \"{duration}\"))".format(author=self.playlist[0].user.name, id=self.playlist[0].user.id, song=self.playlist[0].title, url=self.playlist[0].url))
+                        self.logger.debug("{author} ({id}): Preparing {song} (\"{url}\", \"{duration}\"))".format(author=self.playlist[0].user.name, id=self.playlist[0].user.id, song=self.playlist[0].title, url=self.playlist[0].url, duration=self.playlist[0].duration))
                     else:
                         self.logger.debug("{author} ({id}): Preparing song (\"{url}\")".format(author=self.playlist[0].user.name, id=self.playlist[0].user.id, url=self.playlist[0].url))
                     self.voteSkip = False
@@ -343,12 +385,36 @@ class MusicBot(discord.Client):
                         del self.playlist[0]
                         continue
                     self.player.volume = self.playerVolume
-                    self.player.start()
-                    # We're gonna exend this with embeds once things work
-                    if (self.playlist[0].title != None):
-                        await self.send_message(message.channel, "Started playing {song}, duration: {duration}".format(song=self.playlist[0].title, duration=self.playlist[0].duration))
+                    if(self.playlist[0].title != None):
+                        self.game = discord.Game(
+                            name = self.playlist[0].title,
+                            url = self.config.gameUrl,
+                            type = 1)
                     else:
-                        await self.send_message(message.channel, "Started playing {song}, duration: {duration}".format(song=self.player.title, duration=str(datetime.timedelta(seconds=self.player.duration))))
+                        self.game = discord.Game(
+                            name = self.player.title,
+                            url = self.config.gameUrl,
+                            type = 1)
+                    self.player.start()
+
+                    embed = discord.Embed()
+                    embed.set_author(name=self.playlist[0].user, icon_url=self.playlist[0].user.avatar_url, url=embed.Empty)
+                    if self.playlist[0].user.id in ["121546822765248512"]:
+                        embed.color = int("0x0066BB", 0)
+                    embed.title = embed.Empty
+                    embed.url = embed.Empty
+                    if (self.playlist[0].title != None):
+                        if(len(self.playlist[0].description.split("\n")) > 12):
+                            description = self.playlist[0].description.split("\n")
+                            if(len(description) > 20):
+                                self.playlist[0]._description = "\n".join(description[0:19]) + "and {length} more".format(length=(len(description)-19))
+                            else:
+                                self.playlist[0]._description = "\n".join(description[0:20])
+                        embed.description = "Started playing **[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views".format(title=self.playlist[0].title, url=self.playlist[0].url, duration=self.playlist[0].duration, views=self.playlist[0].views)
+                        embed.add_field(name="Description", value=self.playlist[0].description)
+                    else:
+                        embed.description = "Started playing **[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration}".format(title=self.player.title, url=self.player.url, duration=str(datetime.timedelta(seconds=self.player.duration)))
+                    await self.send_message(message.channel, embed=embed)
                     # Keep checking if something happened with the votes
                     while(self.player.is_playing() and not self.player.is_done()):
                         await asyncio.sleep(1)
@@ -377,6 +443,75 @@ class MusicBot(discord.Client):
                     self.voteSkip = False
                     del self.playlist[0]
 
+                    songList = list()
+                    for song in self.playlist:
+                        songList.append([song.url, song.user.id])
+                    with open(self.fPlaylist, "w", encoding="utf-8") as file:
+                        json.dump(songList, file)
+
+                # Reset the game
+                self.game = discord.Game(
+                    name = self.playlist[0].title,
+                    url = self.config.gameUrl,
+                    type = self.config.gameType)
+
+        if content.startswith("skip"):
+            if content.strip() != "skip":
+                await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} skip\"```".format(prefix=self.formatPrefix)))
+                return
+
+            if(message.author not in self.voteSkipList):
+                self.voteSkipList.append(message.author)
+
+            voiceMembers = self.updateVoteState()
+
+            if not self.voteSkip:
+                await self.send_message(message.channel, "{author} has voted to skip \n{votes} more votes needed".format(author=message.author.name, votes=(math.ceil(len(voiceMembers)*self.votePercentage)-len(self.voteSkipList))))
+
+        if content.startswith("shuffle"):
+            if content.strip() != "shuffle":
+                await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} shuffle\"```".format(prefix=self.formatPrefix)))
+                return
+
+            if(message.author not in self.voteShuffleList):
+                self.voteShuffleList.append(message.author)
+
+            voiceMembers = self.updateVoteState()
+
+            voiceMembers = list()
+            # Check if 75% of the voice members matching the criteria has voted
+            for member in self.voiceChannel.voice_members:
+                if member == self.user:
+                    continue
+                if (member.voice.deaf or member.voice.self_deaf):
+                    continue
+                voiceMembers.append(member)
+
+            if not self.voteShuffle:
+                await self.send_message(message.channel, "{author} has voted to shuffle the playlist \n{votes} more votes needed".format(author=message.author.name, votes=(math.ceil(len(voiceMembers)*self.votePercentage)-len(self.voteShuffleList))))
+
+        if content.startswith("volume"):
+            if content.strip() == "volume":
+                self.logger.error("No arguments were passed after \"volume\", aborting")
+                await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} volume <0-10>\"```".format(prefix=self.formatPrefix)))
+                return
+
+            content = content.replace("volume ", "", 1)
+
+            try:
+                content = float(content)
+                if(content > 10):
+                    content = 10.0
+                if(content < 0):
+                    content = 0.0
+                self.playerVolume = content/5
+                self.player.volume = content/5
+                await self.send_message("Volume set to `{value}`".format(value=content))
+            except ValueError:
+                self.logger.error("Invalid arguments were passed after \"volume\", aborting")
+                await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} volume <0-10>\"```".format(prefix=self.formatPrefix)))
+                return
+
         if content.startswith("eval"):
             if content.strip() == "eval":
                 self.logger.error("No arguments were passed after \"eval\", aborting")
@@ -401,9 +536,13 @@ class MusicBot(discord.Client):
             await self.logout()
 
     async def on_voice_state_update(self, memberBefore, memberAfter):
+        # Don't process if we don't got a voicechannel
+        if not self.voiceChannel:
+            return
+
         # Process voicestate updates from clients connected to voicechannel
         updateVoteState = False
-        await self.checkVoiceClient()
+        # await self.checkVoiceClient()
         if((memberBefore.voice.voice_channel != self.voiceChannel) or (memberAfter.voice.voice_channel != self.voiceChannel)):
             return
             # We don't want to parse voicechannel info which doesn't involve us
@@ -436,7 +575,7 @@ class MusicBot(discord.Client):
 
     def updateVoteState(self):
         if self.is_voice_connected(self.server):
-            if(list(self.voice_clients)[0] == self.voiceChannel):
+            if(self.voiceClient.channel == self.voiceChannel):
                 voiceMembers = list()
                 # Check if 75% of the voice members matching the criteria has voted
                 for member in self.voiceChannel.voice_members:
@@ -445,26 +584,23 @@ class MusicBot(discord.Client):
                     if (member.voice.deaf or member.voice.self_deaf):
                         continue
                     voiceMembers.append(member)
-                if((len(voiceMembers)/len(self.voteSkipList) >= self.votePercentage) and voteSkipEnabled):
+                if(((len(self.voteSkipList)/len(voiceMembers)) >= self.votePercentage) and self.voteSkipEnabled):
                     self.voteSkip = True
-                if((len(voicemembers)/len(self.voteShuffleList) >= self.votePercentage) and voteShuffleEnabled):
+                if(((len(self.voteShuffleList)/len(voiceMembers)) >= self.votePercentage) and self.voteShuffleEnabled):
                     self.voteShuffle = True
+                return voiceMembers
     
-    async def checkVoiceClient(self):
+    def checkVoiceClient(self):
         if(len(self.voiceChannel.voice_members) >= 1):
-            if self.is_voice_connected(self.server):
-                if(list(self.voice_clients)[0].channel == self.voiceChannel):
+            if self.voiceClient:
+                if(self.voiceClient.channel == self.voiceChannel):
                     if(len(self.voiceChannel.voice_members) >= 2):
                         return
-                    self.voiceClient = self.voice_client_in(self.server)
-                    await self.voiceClient.disconnect()
-                    self.voiceClient = None
+                    return None
                 else:
-                    # Guess we got moved, lets go back
-                    await self.move_to(self.voiceChannel)
-                    self.voiceClient = self.voice_client_in(self.server)
+                    return False
             else:
-                self.voiceClient = await self.join_voice_channel(self.voiceChannel)
+                return True
 
     async def on_server_join(self, server):
         if(self.textChannel == None):
@@ -502,7 +638,7 @@ class Youtube:
         apiYoutube = apiBase+"youtube/v3/"
         self.apiYoutubeVideos = apiYoutube+"videos?key={key}&part=snippet,contentDetails,status,statistics&id={id}"
         self.apiYoutubeVideoSearch = apiYoutube+"search?key={key}&part=snippet&type=video&q={searchQuery}"
-        self.apiYoutubeLists = apiYoutube+"playlistItems?key={key}&part=snippet,contentDetails,statistics&maxResults=50&playlistId={id}"
+        self.apiYoutubeLists = apiYoutube+"playlistItems?key={key}&part=snippet,contentDetails&maxResults=50&playlistId={id}"
         
     def getList(self, playlist):
         request = requests.get(self.apiYoutubeLists.format(key=self.key, id=playlist))
@@ -517,9 +653,9 @@ class Youtube:
         url_data = urllib.parse.urlparse(url)
         data = urllib.parse.parse_qs(url_data.query)
         try:
-            return {"url":data["v"][0],"typeUrl":"video"}
-        except ValueError:
             return {"url":data["list"][0],"typeUrl":"list"}
+        except ValueError:
+            return {"url":data["v"][0],"typeUrl":"video"}
         except:
             return {"url":None, "typeUrl":None}
 
@@ -556,7 +692,15 @@ class Video:
     
     @property
     def views(self):
-        return self._views
+        # Add some numbers so we can reverse properly
+        viewCount = str(self._views) + "001"
+        viewCount = viewCount[::-1]
+        viewCount = ".".join([viewCount[i:i+3] for i in range(0, len(viewCount), 3)])
+        viewCount = viewCount[::-1]
+        viewCount = viewCount[0:(len(viewCount)-3)]
+        if viewCount.endswith("."):
+            viewCount = viewCount[0:(len(viewCount)-1)]
+        return viewCount
 
 class Config:
     def __init__(self, file):
@@ -649,7 +793,7 @@ class Config:
         # If someone improperly configurated a channel, we'll split and take first as default
         self.textChannel = config.get("Administration", "textChannel", fallback=None)
         if self.textChannel == "":
-            self.textChannel = None
+            self.textChannel = list()
         if self.textChannel:
             self.textChannel = self.textChannel.split(",")
 
