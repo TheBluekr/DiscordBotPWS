@@ -78,10 +78,8 @@ class MusicBot(discord.Client):
         try:
             with open(self.fPlaylist, "r") as file:
                 self.playlist = json.load(file)
-        except ValueError:
+        except ValueError, FileNotFoundError:
             # Either file has a mistake in indentations, has been corrupted or didn't exist. Let's create a new one later
-            self.playlist = list()
-        except FileNotFoundError:
             with open(self.fPlaylist, "w") as file:
                 json.dump(list(), file)
                 self.playlist = list()
