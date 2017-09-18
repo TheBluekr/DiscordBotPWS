@@ -1,4 +1,4 @@
-version = "0.0.4a"
+version = "0.0.4b"
 
 # To-Do:
 # Extend property list at Video class (done?)
@@ -413,6 +413,7 @@ class MusicBot(discord.Client):
                             name = self.player.title,
                             url = self.config.gameUrl,
                             type = 1)
+                    await self.change_presence(game=self.game)
                     self.player.start()
 
                     embed = discord.Embed()
@@ -432,7 +433,7 @@ class MusicBot(discord.Client):
                         embed.remove_field(0)
                         await self.send_message(message.channel, embed=embed)
                     # Keep checking if something happened with the votes
-                    while(self.player.is_playing() and not self.player.is_done()):
+                    while((self.player.is_playing() and not self.player.is_done()) or not self.player.error):
                         await asyncio.sleep(1)
                         if(self.voteShuffle):
                             if(len(self.playlist) > 2):
@@ -467,9 +468,11 @@ class MusicBot(discord.Client):
 
                 # Reset the game
                 self.game = discord.Game(
-                    name = self.playlist[0].title,
+                    name = self.config.gameName,
                     url = self.config.gameUrl,
                     type = self.config.gameType)
+
+                await self.change_presence(game=self.game)
 
         if content.startswith("skip"):
             if content.strip() != "skip":
