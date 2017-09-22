@@ -1,4 +1,4 @@
-version = "0.0.4b"
+version = "0.0.4"
 
 # To-Do:
 # Extend property list at Video class (done?)
@@ -128,8 +128,8 @@ class MusicBot(discord.Client):
         self.logChannel = None
         self.server = None
         
-        self.admin = self.config.admin
-        self.mod = self.config.mod
+        self.admins = self.config.admin
+        self.mods = self.config.mod
 
         self.game = discord.Game(
             name = self.config.gameName,
@@ -158,10 +158,10 @@ class MusicBot(discord.Client):
         self.googleAPI = self.config.googleAPI
         if self.googleAPI:
             self.addPlaylist = self.config.addPlaylistEnabled
+            self.youtube = Youtube(self.googleAPI)
         else:
             self.addPlaylist = False
-        
-        self.youtube = Youtube(self.googleAPI)
+            self.youtube = None
 
     async def on_ready(self):
         # Initialize login and states
@@ -207,8 +207,19 @@ class MusicBot(discord.Client):
         for pos, song in enumerate(self.playlist, start=1):
             user = await self.get_user_info(song[1])
 
-            if(self.googleAPI):
+            if(self.youtube):
                 videoContent = self.youtube.getVideo(song[0])
+
+                try:
+                    if (videoContent["error"]["code"] == 403):
+                        # Likely something with the key, revert to state without one
+                        self.logger.exception("Youtube Data API returned 403 with the message: {message}".format(message=videoContent["error"]["message"]))
+                        self.logger.debug("Falling back to defaults")
+                        self.youtube = None
+                    else:
+                        continue
+                except:
+                    pass
 
                 if(videoContent["pageInfo"]["totalResults"] == 0):
                     continue
@@ -222,10 +233,19 @@ class MusicBot(discord.Client):
             print(" "*textLength, end="\r")
             textPrint = "[{pos}/{len}] {name} - {url}".format(pos=pos, len=len(playlist), name=videoInfo["snippet"]["title"], url=videoInfo["id"])
             textLength = len(textPrint)
-            print(textPrint, end="\r")
+            try:
+                print(textPrint, end="\r")
+            except:
+                print("", end="\r")
+        await asyncio.sleep(1)
         print(" "*textLength, end="\r")
         self.logger.info("Done loading")
         self.voiceClient = await self.join_voice_channel(self.voiceChannel)
+        if(len(self.admins) == 0):
+            self.admins.append(self.server.owner)
+            application = await self.application_info()
+            if(self.server.owner != application.owner):
+                self.admins.append(application.owner)
             
 
     async def on_message(self, message):
@@ -295,7 +315,7 @@ class MusicBot(discord.Client):
             if (len(content.split(' ', 1)) == 2):
                 if ((message.author in self.mods) or (message.author in self.admins)):
                     try:
-                        queuePos = int(content.split(' ', 1)[1])
+                        queuePos = int(content.split(' ', 1)[1])-1
                         content = content.split(' ', 1)[0]
                     except:
                         queuePos = len(self.playlist)
@@ -309,6 +329,8 @@ class MusicBot(discord.Client):
             
             if(queuePos <= 0):
                 queuePos = 0
+
+            self.logger.info("Adding song at pos {pos}".format(pos=queuePos+1))
             
             videoList = list()
             
@@ -323,7 +345,7 @@ class MusicBot(discord.Client):
                     videoList.append(url["url"])
                 elif(url["typeUrl"] == "list"):
                     self.logger.info("Received list with id \"{id}\"".format(id=url["url"]))
-                    if self.googleAPI:
+                    if self.youtube:
                         response = self.youtube.getList(url["url"])
                         if "error" in response.keys():
                             await self.send_message(message.channel, "Something went wrong during retrieving the playlist \nReceived the following response: \n```{message}```".format(message=content["error"]["message"]))
@@ -342,7 +364,7 @@ class MusicBot(discord.Client):
             songList = list()
 
             for video in videoList:
-                if self.googleAPI:
+                if self.youtube:
                     videoContent = self.youtube.getVideo(video)
                     
                     # We received nothing about this, abort this one
@@ -357,7 +379,7 @@ class MusicBot(discord.Client):
                     songList.append(Video(message.author, video))
             
             # Easy method to parse multiple songs in case, not efficient for 1 only though
-            for queuePos, song in enumerate(songList, start=queuePos):
+            for queuePos, song in enumerate(songList, start=queuePos+1):
                 self.playlist.insert(queuePos+songList.index(song), song)
                 if(len(songList) == 1):
                     if(song.title):
@@ -386,9 +408,11 @@ class MusicBot(discord.Client):
                     await self.send_message(message.channel, "The player is already active {author} !\nJoin `{voice}` channel to tune in".format(author=message.author.mention, voice=self.voiceChannel.name))
                     return
                 while(len(self.playlist) > 0):
-                    # Some bizarre bug makes this continue
+                    # Some bizarre bug makes this continue so stop this loop
                     if(len(self.playlist) == 0):
-                        return
+                        break
+                    # Reserve the attrib to prevent double players while waiting
+                    self.player = str()
                     # We've got an Video object with more attribs if API was used
                     if(self.playlist[0].title != None):
                         self.logger.debug("{author} ({id}): Preparing {song} (\"{url}\", \"{duration}\"))".format(author=self.playlist[0].user.name, id=self.playlist[0].user.id, song=self.playlist[0].title, url=self.playlist[0].url, duration=self.playlist[0].duration))
@@ -396,9 +420,14 @@ class MusicBot(discord.Client):
                         self.logger.debug("{author} ({id}): Preparing song (\"{url}\")".format(author=self.playlist[0].user.name, id=self.playlist[0].user.id, url=self.playlist[0].url))
                     self.voteSkip = False
                     self.voteShuffle = False
-                    self.player = await self.voiceClient.create_ytdl_player(self.playlist[0].url)
+                    try:
+                        self.player = await self.voiceClient.create_ytdl_player(self.playlist[0].url)
+                    except(youtube_dl.utils.GeoRestrictedError, youtube_dl.utils.DownloadError):
+                        self.logger.error("Youtube-dl failed to download from \"{url}\"".format(title=self.playlist[0].url))
+                        del self.playlist[0]
+                        continue
                     # Based on Discord.py API we should receive None when youtube-dl fails to extract info
-                    if self.player.title == None:
+                    if((self.player.title == None) or (self.player.error)):
                         self.logger.error("Youtube-dl failed to extract info from \"{url}\"".format(title=self.playlist[0].url))
                         del self.playlist[0]
                         continue
@@ -433,7 +462,7 @@ class MusicBot(discord.Client):
                         embed.remove_field(0)
                         await self.send_message(message.channel, embed=embed)
                     # Keep checking if something happened with the votes
-                    while((self.player.is_playing() and not self.player.is_done()) or not self.player.error):
+                    while(self.player.is_playing() and not self.player.is_done()):
                         await asyncio.sleep(1)
                         if(self.voteShuffle):
                             if(len(self.playlist) > 2):
@@ -454,8 +483,10 @@ class MusicBot(discord.Client):
                             self.voteSkip = False
                             await self.send_message(message.channel, "Skipping current song")
                             self.player.stop()
-                    # Prevent further things from happening at other commands
-                    self.player = None
+
+                    if self.player.error:
+                        await self.send_message(message.channel, "Player stopped with the following message: \n```{message}```".format(message-self.player.error))
+
                     self.voteSkipList = list()
                     self.voteSkip = False
                     del self.playlist[0]
@@ -473,8 +504,13 @@ class MusicBot(discord.Client):
                     type = self.config.gameType)
 
                 await self.change_presence(game=self.game)
+                self.player = None
 
         if content.startswith("skip"):
+            if not self.player:
+                await self.send_message(message.channel, "Player isn't active")
+                return
+
             if content.strip() != "skip":
                 await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} skip\"```".format(prefix=self.formatPrefix)))
                 return
@@ -488,6 +524,10 @@ class MusicBot(discord.Client):
                 await self.send_message(message.channel, "{author} has voted to skip \n{votes} more votes needed".format(author=message.author.name, votes=(math.ceil(len(voiceMembers)*self.votePercentage)-len(self.voteSkipList))))
 
         if content.startswith("shuffle"):
+            if not self.player:
+                await self.send_message(message.channel, "Player isn't active")
+                return
+
             if content.strip() != "shuffle":
                 await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} shuffle\"```".format(prefix=self.formatPrefix)))
                 return
@@ -497,19 +537,14 @@ class MusicBot(discord.Client):
 
             voiceMembers = self.updateVoteState()
 
-            voiceMembers = list()
-            # Check if 75% of the voice members matching the criteria has voted
-            for member in self.voiceChannel.voice_members:
-                if member == self.user:
-                    continue
-                if (member.voice.deaf or member.voice.self_deaf):
-                    continue
-                voiceMembers.append(member)
-
             if not self.voteShuffle:
                 await self.send_message(message.channel, "{author} has voted to shuffle the playlist \n{votes} more votes needed".format(author=message.author.name, votes=(math.ceil(len(voiceMembers)*self.votePercentage)-len(self.voteShuffleList))))
 
         if content.startswith("volume"):
+            if not self.player:
+                await self.send_message(message.channel, "Player isn't active")
+                return
+
             if content.strip() == "volume":
                 self.logger.error("No arguments were passed after \"volume\", aborting")
                 await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} volume <0-10>\"```".format(prefix=self.formatPrefix)))
@@ -524,7 +559,8 @@ class MusicBot(discord.Client):
                 if(content < 0):
                     content = 0.0
                 self.playerVolume = content/5
-                self.player.volume = content/5
+                if(self.player and (self.player != str())):
+                    self.player.volume = content/5
                 await self.send_message("Volume set to `{value}`".format(value=content))
             except ValueError:
                 self.logger.error("Invalid arguments were passed after \"volume\", aborting")
@@ -532,6 +568,14 @@ class MusicBot(discord.Client):
                 return
 
         if content.startswith("timeleft"):
+            if not self.player:
+                await self.send_message(message.channel, "Player isn't active")
+                return
+
+            if self.player.is_done():
+                await self.send_message(message.channel, "The player is done")
+                return
+
             if content.strip() != "timeleft":
                 await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} timeleft\"```".format(prefix=self.formatPrefix)))
                 return
@@ -810,7 +854,7 @@ class Config:
         self.logger.info("Loading admins")
         self.admin = config.get("Administration", "Administrator", fallback=None)
         if self.admin == "":
-            self.admin = None
+            self.admin = list()
         if self.admin:
             self.admin = self.admin.split(",")
             if len(self.admin) != 1:
@@ -823,7 +867,7 @@ class Config:
         self.logger.info("Loading mods")
         self.mod = config.get("Administration", "Moderator", fallback=None)
         if self.mod == "":
-            self.mod = None
+            self.mod = list()
         if self.mod:
             self.mod = self.mod.split(",")
             if len(self.mod) != 1:
