@@ -423,12 +423,17 @@ class MusicBot(discord.Client):
                     try:
                         self.player = await self.voiceClient.create_ytdl_player(self.playlist[0].url)
                     except(youtube_dl.utils.GeoRestrictedError, youtube_dl.utils.DownloadError):
-                        self.logger.error("Youtube-dl failed to download from \"{url}\"".format(title=self.playlist[0].url))
+                        self.logger.error("Youtube-dl failed to download from \"{url}\"".format(url=self.playlist[0].url))
                         del self.playlist[0]
+                        songList = list()
+                        for song in self.playlist:
+                            songList.append([song.url, song.user.id])
+                        with open(self.fPlaylist, "w", encoding="utf-8") as file:
+                            json.dump(songList, file)
                         continue
                     # Based on Discord.py API we should receive None when youtube-dl fails to extract info
                     if((self.player.title == None) or (self.player.error)):
-                        self.logger.error("Youtube-dl failed to extract info from \"{url}\"".format(title=self.playlist[0].url))
+                        self.logger.error("Youtube-dl failed to extract info from \"{url}\"".format(url=self.playlist[0].url))
                         del self.playlist[0]
                         continue
                     self.player.volume = self.playerVolume
