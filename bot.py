@@ -1,11 +1,11 @@
-version = "0.0.4"
+version = "0.0.5"
 
 # To-Do:
 # Extend property list at Video class (done?)
-# Add API requests at Youtube class (done?)
-# Add a function to make the bot the author of the song when the original author can't be retrieved
-# Add embeds to messages when songs play (low priority)
-# Add exceptionMessage() to get custom error messages for both console and discord (later)
+# Add API requests at Youtube class (done)
+# Add a function to make the bot the author of the song when the original author can't be retrieved (not needed?)
+# Add embeds to messages when songs play (low priority, done)
+# Add exceptionMessage() to get custom error messages for both console and discord (later?)
 # Define setup event when joining server
 # Take current create_ytdl_player function from discord.py and use it on local level (prepare for rewrite)
 # Prepare for future rewrite (more code)
@@ -117,6 +117,7 @@ class MusicBot(discord.Client):
         self.playerStartTime = None
         self.playerEndTime = None
         self.playerVolume = 1.0
+        self.playerForceStop = False
 
         # Server related setup
         self.textChannelId = self.config.textChannel
@@ -409,7 +410,7 @@ class MusicBot(discord.Client):
                     return
                 while(len(self.playlist) > 0):
                     # Some bizarre bug makes this continue so stop this loop
-                    if(len(self.playlist) == 0):
+                    if((len(self.playlist) == 0) or self.playerForceStop):
                         break
                     # Reserve the attrib to prevent double players while waiting
                     self.player = str()
@@ -478,19 +479,43 @@ class MusicBot(discord.Client):
                                 self.playlist.insert(0, song)
                                 self.voteShuffleList = list()
                                 self.voteShuffle = False
-                                await self.send_message(message.channel, "Shuffling playlist")
+                                embed = embed.Embed()
+                                embed.set_author(name=self.user, icon_url=self.user.avatar_url, url=embed.Empty)
+                                embed.color = int("0x0066BB", 0)
+                                embed.title = "Voting"
+                                embed.url = embed.Empty
+                                embed.description = "Shuffling playlist"
+                                await self.send_message(message.channel, embed=embed)
                             else:
                                 self.voteShuffleList = list()
                                 self.voteShuffle = False
-                                await self.send_message(message.channel, "Playlist is too short to shuffle!")
+                                embed = embed.Embed()
+                                embed.set_author(name=self.user, icon_url=self.user.avatar_url, url=embed.Empty)
+                                embed.color = int("0x0066BB", 0)
+                                embed.title = "**Voting**"
+                                embed.url = embed.Empty
+                                embed.description = "Playlist is too short to shuffle!"
+                                await self.send_message(message.channel, embed=embed)
                         if(self.voteSkip):
                             self.voteSkipList = list()
                             self.voteSkip = False
-                            await self.send_message(message.channel, "Skipping current song")
+                            embed = embed.Embed()
+                            embed.set_author(name=self.user, icon_url=self.user.avatar_url, url=embed.Empty)
+                            embed.color = int("0x0066BB", 0)
+                            embed.title = "**Voting**"
+                            embed.url = embed.Empty
+                            embed.description = "Skipping **[{title}](https://www.youtube.com/watch?v={url} '{url}')** song".format(title=self.playlist[0].title, url=self.playlist[0].url)
+                            await self.send_message(message.channel, embed=embed)
                             self.player.stop()
 
                     if self.player.error:
-                        await self.send_message(message.channel, "Player stopped with the following message: \n```{message}```".format(message-self.player.error))
+                        embed = embed.Embed()
+                        embed.set_author(name=self.user, icon_url=self.user.avatar_url, url=embed.Empty)
+                        embed.color = int("0x0066BB", 0)
+                        embed.title = embed.Empty
+                        embed.url = embed.Empty
+                        embed.description = "Player stopped with the following message: \n```{message}```".format(message-self.player.error)
+                        await self.send_message(message.channel, embed=embed)
 
                     self.voteSkipList = list()
                     self.voteSkip = False
@@ -510,6 +535,20 @@ class MusicBot(discord.Client):
 
                 await self.change_presence(game=self.game)
                 self.player = None
+                self.playerForceStop = False
+        
+        if content.startswith("pause"):
+            if not self.player:
+                await self.send_message(message.channel, "Player isn't active")
+                return
+            self.player.pause()
+        
+        if content.startswith("stop"):
+            if not self.player:
+                await self.send_message(message.channel, "Player isn't active")
+                return
+            
+            self.playerForceStop = True
 
         if content.startswith("skip"):
             if not self.player:
@@ -525,8 +564,16 @@ class MusicBot(discord.Client):
 
             voiceMembers = self.updateVoteState()
 
-            if not self.voteSkip:
-                await self.send_message(message.channel, "{author} has voted to skip \n{votes} more votes needed".format(author=message.author.name, votes=(math.ceil(len(voiceMembers)*self.votePercentage)-len(self.voteSkipList))))
+            embed = embed.Embed()
+            embed.set_author(name=self.user, icon_url=self.user.avatar_url, url=embed.Empty)
+            embed.color = int("0x0066BB", 0)
+            embed.title = "**Voting**"
+            embed.url = embed.Empty
+            if((math.ceil(len(voiceMembers)*self.votePercentage)-len(self.voteSkipList)) > 0):
+                embed.description = "{author} has voted to skip \n{votes} more votes needed".format(author=message.author.name, votes=(math.ceil(len(voiceMembers)*self.votePercentage)-len(self.voteSkipList)))
+            else:
+                embed.description = "{author} has voted to skip \n{votes} more votes needed".format(author=message.author.name, votes="No")
+            await self.send_message(message.channel, embed=embed)
 
         if content.startswith("shuffle"):
             if not self.player:
@@ -542,8 +589,17 @@ class MusicBot(discord.Client):
 
             voiceMembers = self.updateVoteState()
 
-            if not self.voteShuffle:
-                await self.send_message(message.channel, "{author} has voted to shuffle the playlist \n{votes} more votes needed".format(author=message.author.name, votes=(math.ceil(len(voiceMembers)*self.votePercentage)-len(self.voteShuffleList))))
+            embed = embed.Embed()
+            embed.set_author(name=self.user, icon_url=self.user.avatar_url, url=embed.Empty)
+            embed.color = int("0x0066BB", 0)
+            embed.title = "**Voting**"
+            embed.url = embed.Empty
+            if((math.ceil(len(voiceMembers)*self.votePercentage)-len(self.voteShuffleList)) > 0):
+                embed.description = "{author} has voted to shuffle the playlist \n{votes} more votes needed".format(author=message.author.name, votes=(math.ceil(len(voiceMembers)*self.votePercentage)-len(self.voteShuffleList)))
+            else:
+                embed.description = "{author} has voted to shuffle the playlist \n{votes} more votes needed".format(author=message.author.name, votes="No")
+            
+            await self.send_message(message.channel, embed=embed)
 
         if content.startswith("volume"):
             if not self.player:
@@ -556,7 +612,12 @@ class MusicBot(discord.Client):
                 return
 
             content = content.replace("volume ", "", 1)
-
+            
+            embed = discord.Embed()
+            embed.title = embed.Empty
+            embed.url = embed.Empty
+            embed.set_author(name=message.author.name, icon_url=message.author.avatar_url, url=embed.Empty)
+            
             try:
                 content = float(content)
                 if(content > 10):
@@ -566,10 +627,12 @@ class MusicBot(discord.Client):
                 self.playerVolume = content/5
                 if(self.player and (self.player != str())):
                     self.player.volume = content/5
-                await self.send_message("Volume set to `{value}`".format(value=content))
+                embed.description = "Volume set to `{value}`".format(value=content)
+                await self.send_message(message.channel, embed=embed)
             except ValueError:
                 self.logger.error("Invalid arguments were passed after \"volume\", aborting")
-                await self.send_message(message.channel, formatErrorSyntax.format(format="```\"{prefix} volume <0-10>\"```".format(prefix=self.formatPrefix)))
+                embed.description = formatErrorSyntax.format(format="```\"{prefix} volume <0-10>\"```".format(prefix=self.formatPrefix))
+                await self.send_message(message.channel, embed=embed)
                 return
 
         if content.startswith("timeleft"):
@@ -603,10 +666,8 @@ class MusicBot(discord.Client):
             songList = list()
             remaining = 0
             for queuePos, song in enumerate(self.playlist, start=1):
-                if queuePos == 21:
-                    # Delete 20th element (21th won't be added)
-                    del songList[19]
-                    remaining = len(self.playlist)-19
+                if queuePos == 16:
+                    remaining = len(self.playlist)-15
                     songList.append("and {remaining} more".format(remaining=remaining))
                     break
                 songList.append("[{pos}/{total}] - **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(pos=queuePos, total=len(self.playlist), title=song.title, url=song.url))
