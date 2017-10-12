@@ -1,4 +1,4 @@
-version = "0.0.6a"
+version = "0.0.7a"
 
 # To-Do:
 # Extend property list at Video class (done?)
@@ -173,13 +173,12 @@ class MusicBot(discord.Client):
         # Initialize login and states
         self.logger.info("Succesfully logged in as {name}".format(name=self.user.name))
 
-        # We defined the discord.Game() class at the begin as self.game
-        if(self.game.url and (self.game.type == 1)):
-            self.logger.info("Started streaming {name}".format(name=self.game.name))
-            await self.change_presence(game=self.game)
-        else:
-            self.logger.info("Started playing {name}".format(name=self.game.name))
-            await self.change_presence(game=self.game)
+        game = discord.Game(
+            name = "loading songs...",
+            url = self.config.gameUrl,
+            type = 0)
+
+        await self.change_presence(game=game)
         
         self.formatPrefix = self.user if not self.flagUsePrefix else self.prefix
         self.logger.info("Prefix set to \"{prefix}\"".format(prefix=self.formatPrefix))
@@ -244,6 +243,14 @@ class MusicBot(discord.Client):
                 songList.append(Video(user, song[0]))
             # Update this to current playlist
             self.playlist = songList
+
+        # We defined the discord.Game() class at the begin as self.game
+        if(self.game.url and (self.game.type == 1)):
+            self.logger.info("Started streaming {name}".format(name=self.game.name))
+            await self.change_presence(game=self.game)
+        else:
+            self.logger.info("Started playing {name}".format(name=self.game.name))
+            await self.change_presence(game=self.game)
             
         await asyncio.sleep(1)
         print(" "*textLength, end="\r")
@@ -365,7 +372,7 @@ class MusicBot(discord.Client):
 
                     # Received the content from the API, parse it for the id's
                     for video in response["items"]:
-                        videoContent = self.youtube.getVideo(video)
+                        videoContent = self.youtube.getVideo(video["snippet"]["resourceId"]["videoId"])
                     
                         # We received nothing about this, abort this one
                         if(videoContent["pageInfo"]["totalResults"] == 0):
@@ -414,7 +421,7 @@ class MusicBot(discord.Client):
                 else:
                     if(songList.index(song) == 0):
                         messageDescription.append("Added: \n")
-                    if(songList.index(song) < 20):
+                    if(songList.index(song) < 15):
                         messageDescription.append("**[{pos}/{total}] [{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(pos=queuePos, total=len(songList), title=song.title, url=song.url))
 
             embed.description = "\n".join(messageDescription)
@@ -609,7 +616,8 @@ class MusicBot(discord.Client):
                     await self.add_reaction(searchMessage, "4\u20e3")
                 elif(pos == 5):
                     await self.add_reaction(searchMessage, "5\u20e3")
-            res = await self.wait_for_reaction(["1\u20e3", "2\u20e3", "3\u20e3", "4\u20e3", "5\u20e3"], message=searchMessage, timeout=20.0, user=message.author)
+            await self.add_reaction(searchMessage, "\u23f9")
+            res = await self.wait_for_reaction(["1\u20e3", "2\u20e3", "3\u20e3", "4\u20e3", "5\u20e3", "\u23f9"], message=searchMessage, timeout=20.0, user=message.author)
             if(res):
                 if(res.reaction.emoji == "1\u20e3"):
                     number = 0
@@ -621,6 +629,9 @@ class MusicBot(discord.Client):
                     number = 3
                 elif(res.reaction.emoji == "5\u20e3"):
                     number = 4
+                elif(res.reaction.emoji == "\u23f9"):
+                    await self.clear_reactions(searchMessage)
+                    return
 
                 await self.clear_reactions(searchMessage)
 
@@ -649,6 +660,8 @@ class MusicBot(discord.Client):
                     songList.append([song.url, song.user.id])
                 with open(self.fPlaylist, "w", encoding="utf-8") as file:
                     json.dump(songList, file)
+            else:
+                await self.clear_reactions(searchMessage)
         
         if content.startswith("pause"):
             if not self.player:
@@ -794,17 +807,19 @@ class MusicBot(discord.Client):
             embed.title = embed.Empty
             embed.url = embed.Empty
             embed.set_author(name=message.author.name, icon_url=message.author.avatar_url, url=embed.Empty)
+            if message.author.id in self.embedColors.keys():
+                embed.color = self.embedColors[message.author.id]
             
             try:
-                content = float(content)
-                if(content > 10):
-                    content = 10.0
-                if(content < 0):
-                    content = 0.0
-                self.playerVolume = content/5
+                volume = float(content)
+                if(volume > 10):
+                    volume = 10.0
+                if(volume < 0):
+                    volume = 0.0
+                self.playerVolume = volume/5
                 if(self.player and (self.player != str())):
-                    self.player.volume = content/5
-                embed.description = "Volume set to `{value}`".format(value=content)
+                    self.player.volume = volume/5
+                embed.description = "Volume set to `{value}`".format(value=volume)
                 await self.send_message(message.channel, embed=embed)
             except ValueError:
                 self.logger.error("Invalid arguments were passed after \"volume\", aborting")
@@ -833,6 +848,38 @@ class MusicBot(discord.Client):
                 await self.send_message(message.channel, formatErrorSyntax.format(format="```{prefix} list```".format(prefix=self.formatPrefix)))
                 return
 
+            if(not self.youtube):
+                return
+
+            #embed = discord.Embed()
+            #if(len(self.playlist) > 0):
+                #embed.set_author(name=self.playlist[0].user, icon_url=self.playlist[0].user.avatar_url, url=embed.Empty)
+            #else:
+                #embed.set_author(name=message.author, icon_url=message.author.avatar_url, url=embed.Empty)
+            #if self.user.id in self.embedColors.keys():
+                #embed.color = self.embedColors[self.user.id]
+            #embed.title = embed.Empty
+            #embed.url = embed.Empty
+            #embed.description = embed.Empty
+
+            #songList = list()
+            #remaining = 0
+            #for queuePos, song in enumerate(self.playlist, start=1):
+                #if self.player:
+                    #if queuePos == 1:
+                        #embed.description = "Currently playing: **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.playlist[0].title, url=self.playlist[0].url)
+                        #continue
+                    #songList.append("[{pos}/{total}] - **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(pos=(queuePos-1), total=(len(self.playlist)-1), title=song.title, url=song.url))
+                #else:
+                    #songList.append("[{pos}/{total}] - **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(pos=queuePos, total=(len(self.playlist)), title=song.title, url=song.url))
+            
+            #if(len(songList) >= 8):
+                #embed.add_field(name="**Playlist**:", value="\n".join(songList[0:7]))
+            #elif(len(songList) > 1):
+                #embed.add_field(name="**Playlist**:", value="\n".join(songList[0:(len(songList)-1)]))
+            #elif(len(songList) == 1):
+                #embed.add_field(name="**Playlist**:", value="\n".join(songList))
+
             embed = discord.Embed()
             if(len(self.playlist) > 0):
                 embed.set_author(name=self.playlist[0].user, icon_url=self.playlist[0].user.avatar_url, url=embed.Empty)
@@ -840,26 +887,50 @@ class MusicBot(discord.Client):
                 embed.set_author(name=message.author, icon_url=message.author.avatar_url, url=embed.Empty)
             if self.user.id in self.embedColors.keys():
                 embed.color = self.embedColors[self.user.id]
-            embed.title = embed.Empty
-            embed.url = embed.Empty
 
             songList = list()
-            remaining = 0
-            for queuePos, song in enumerate(self.playlist, start=1):
-                if self.player:
-                    if queuePos == 1:
-                        embed.description = "Currently playing: **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.playlist[0].title, url=self.playlist[0].url)
-                        continue
-                    songList.append("[{pos}/{total}] - **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(pos=(queuePos-1), total=(len(self.playlist)-1), title=song.title, url=song.url))
-                else:
-                    songList.append("[{pos}/{total}] - **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(pos=queuePos, total=(len(self.playlist)), title=song.title, url=song.url))
-            
-            if(len(songList) >= 8):
-                embed.add_field(name="**Playlist**:", value="\n".join(songList[0:7]))
+            if(self.player):
+                embed.description = "Currently playing: **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.playlist[0].title, url=self.playlist[0].url)
+                songList = self.playlist[1:]
             else:
-                embed.add_field(name="**Playlist**:", value="\n".join(songList[0:(len(songList)-1)]))
+                embed.description = embed.Empty
+                songList = self.playlist
 
-            await self.send_message(message.channel, embed=embed)
+            indexNumber = 0
+
+            if(len(songList) > 0):
+                embed.add_field(name="Playlist", value="**[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views \nPosition {pos} of {total}".format(title=songList[indexNumber].title, url=songList[indexNumber].url, duration=songList[indexNumber].duration, views=songList[indexNumber].views, pos=(indexNumber+1), total=len(songList)))
+                embed.set_footer(text="Added by {author}".format(author=songList[indexNumber].user.name), icon_url=songList[indexNumber].user.avatar_url)
+            listMessage = await self.send_message(message.channel, embed=embed)
+
+            if(len(songList) > 0):
+                # Need something other than None
+                result = True
+                while(result != None):
+                    if(len(songList) > 1):
+                        if(songList.index(songList[0]) != indexNumber):
+                            await self.add_reaction(listMessage, "\u25c0")
+                        await self.add_reaction(listMessage, "\u23f9")
+                        if(songList.index(songList[-1]) != indexNumber):
+                            await self.add_reaction(listMessage, "\u25b6")
+                    result = await self.wait_for_reaction(["\u25c0", "\u23f9", "\u25b6"], user=message.author, timeout=10.0)
+                    if(result):
+                        if(result.reaction.emoji == "\u25c0"):
+                            indexNumber -= 1
+                            await self.clear_reactions(listMessage)
+                        elif(result.reaction.emoji == "\u23f9"):
+                            await self.clear_reactions(listMessage)
+                            break
+                        elif(result.reaction.emoji == "\u25b6"):
+                            indexNumber += 1
+                            await self.clear_reactions(listMessage)
+                    embed.clear_fields()
+                    embed.add_field(name="Playlist", value="**[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views \nPosition {pos} of {total}".format(title=songList[indexNumber].title, url=songList[indexNumber].url, duration=songList[indexNumber].duration, views=songList[indexNumber].views, pos=(indexNumber+1), total=len(songList)))
+                    embed.set_footer(text="Added by {author}".format(author=songList[indexNumber].user.name), icon_url=songList[indexNumber].user.avatar_url)
+                    await self.edit_message(listMessage, embed=embed)
+            else:
+                await self.clear_reactions(listMessage)
+
 
         if content.startswith("eval"):
             if content.strip() == "eval":
