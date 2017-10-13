@@ -1,4 +1,4 @@
-version = "0.0.7a"
+version = "0.0.8a"
 
 # To-Do:
 # Extend property list at Video class (done?)
@@ -264,6 +264,7 @@ class MusicBot(discord.Client):
             
 
     async def on_message(self, message):
+        self.logger.info(message.content)
         # First check if it's us being tagged or correct prefix is being used
         if(self.flagUsePrefix == False):
             # Prevent issues, if this is smaller than 0 (wat?), we got a problem
@@ -931,6 +932,70 @@ class MusicBot(discord.Client):
             else:
                 await self.clear_reactions(listMessage)
 
+        if content.startswith("remove"):
+            if content.strip() != "remove":
+                return
+
+            embed = discord.Embed()
+            embed.set_author(name=message.author, icon_url=message.author.avatar_url, url=embed.Empty)
+            if self.user.id in self.embedColors.keys():
+                embed.color = self.embedColors[self.user.id]
+
+            songList = list()
+            for song in self.playlist:
+                if song.user == message.author:
+                    if((self.player) and (song == self.playlist[0])):
+                        continue
+                    songList.append(song)
+
+            self.logger.info("Found {number} songs of {author}".format(number=len(songList), author=message.author))
+
+            indexNumber = 0
+
+            if(len(songList) > 0):
+                embed.description = "**[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views \nPosition {pos} of {total}".format(title=songList[indexNumber].title, url=songList[indexNumber].url, duration=songList[indexNumber].duration, views=songList[indexNumber].views, pos=(indexNumber+1), total=len(songList))
+                embed.set_footer(text="Respond with \u274c to remove")
+            else:
+                embed.description = "No songs were found"
+            listMessage = await self.send_message(message.channel, embed=embed)
+
+            if(len(songList) > 0):
+                # Need something other than None
+                result = True
+                while(result != None):
+                    if(len(songList) > 1):
+                        if(songList.index(songList[0]) != indexNumber):
+                            await self.add_reaction(listMessage, "\u25c0")
+                        await self.add_reaction(listMessage, "\u23f9")
+                        if(songList.index(songList[-1]) != indexNumber):
+                            await self.add_reaction(listMessage, "\u25b6")
+                        await self.add_reaction(listMessage, "\u274c")
+                    result = await self.wait_for_reaction(["\u25c0", "\u23f9", "\u25b6", "\u274c"], user=message.author, timeout=10.0)
+                    if(result):
+                        if(result.reaction.emoji == "\u25c0"):
+                            indexNumber -= 1
+                            await self.clear_reactions(listMessage)
+                        elif(result.reaction.emoji == "\u23f9"):
+                            await self.clear_reactions(listMessage)
+                            break
+                        elif(result.reaction.emoji == "\u25b6"):
+                            indexNumber += 1
+                            await self.clear_reactions(listMessage)
+                        elif(result.reaction.emoji == "\u274c"):
+                            self.playlist.remove(songList[indexNumber])
+                            await self.clear_reactions(listMessage)
+                            embed.description = "Removed **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=songList[indexNumber].title, url=songList[indexNumber].url)
+                            embed.set_footer(text=embed.Empty)
+                            await self.send_message(message.channel, embed=embed)
+                            for song in self.playlist:
+                                songList.append([song.url, song.user.id])
+                            with open(self.fPlaylist, "w", encoding="utf-8") as file:
+                                json.dump(songList, file)
+                    embed.description = "**[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views \nPosition {pos} of {total}".format(title=songList[indexNumber].title, url=songList[indexNumber].url, duration=songList[indexNumber].duration, views=songList[indexNumber].views, pos=(indexNumber+1), total=len(songList))
+                    embed.set_footer(text="Respond with \u274c to remove")
+                    await self.edit_message(listMessage, embed=embed)
+            else:
+                await self.clear_reactions(listMessage)
 
         if content.startswith("eval"):
             if content.strip() == "eval":
