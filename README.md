@@ -3,6 +3,8 @@
 
 Music bot written in Python for [DiscordApp](https://discordapp.com/). So far only supports Youtube videos or playlists (if Google API key is registered).
 
+======
+
 #### Setup:
   * Recommended to use with Python 3.5 and later
   * The bot requires the following dependencies:
