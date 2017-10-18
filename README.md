@@ -9,10 +9,10 @@ Music bot written in Python for [DiscordApp](https://discordapp.com/). So far on
   * Recommended to use with Python 3.5 and later
   * The bot requires the following dependencies:
     * [discord.py](https://github.com/Rapptz/discord.py) (with voice support) (python)
-    * requests (python)
-    * isodate (python)
-    * datetime (python)
-    * configparser (python)
+    * requests (Python)
+    * isodate (Python)
+    * datetime (Python)
+    * configparser (Python)
     * youtube-dl (requirement for discord.py) (python)
     * ffmpeg
   * The bot should create the folders and files on first boot and exit due to invalid login credentials. The credentials can be configured at "/settings/config.cfg" at "Auth". Put a bot key at "token" or an email and password of an account at the corresponding variables. The bot will take a bot token unless the "usetoken" is set to false.
@@ -29,18 +29,18 @@ Music bot written in Python for [DiscordApp](https://discordapp.com/). So far on
 ======
 
 #### Commands:
-  * \<prefix\> add <video id>
-  * \<prefix\> add <full url with "&list="> (requires Google API)
-  * \<prefix\> play
-  * \<prefix\> search <content> (add by reacting to a number) (requires Google API)
-  * \<prefix\> volume <0-10> (also accepting decimals with a .) (mod/admin only)
-  * \<prefix\> pause (mod/admin only (soon(tm)))
-  * \<prefix\> resume (mod/admin only (soon(tm)))
-  * \<prefix\> timeleft
-  * \<prefix\> skip (will trigger a vote if active)
-  * \<prefix\> shuffle (will trigger a vote if active)
-  * \<prefix\> remove (able to remove added songs of your own)
-  * \<prefix\> list (requires Google API for full support)
-  * \<prefix\> eval <object> (admin only)
+  * `<prefix> add <video id>`
+  * `<prefix> add <full url with "&list=">` (requires Google API)
+  * `<prefix> play`
+  * `<prefix> search <content>` (add by reacting to a number) (requires Google API)
+  * `<prefix> volume <0-10>` (also accepting decimals with a .) (mod/admin only)
+  * `<prefix> pause` (mod/admin only (soon(tm)))
+  * `<prefix> resume` (mod/admin only (soon(tm)))
+  * `<prefix> timeleft`
+  * `<prefix> skip` (will trigger a vote if active)
+  * `<prefix> shuffle` (will trigger a vote if active)
+  * `<prefix> remove` (able to remove added songs of your own)
+  * `<prefix> list` (requires Google API for full support)
+  * `<prefix> eval <object>` (admin only)
 
 Gemaakt als opdracht voor Het Amsterdams Lyceum als Profiel Werkstuk.
