@@ -32,6 +32,7 @@ Music bot written in Python for [DiscordApp](https://discordapp.com/). So far on
   * Bot will take the server of the configured voicechannel as default.
   * If no administrators are configured the bot will take the application owner and server owner by default.
   * Keep in mind if the Youtube API fails the key will get reset unless the bot gets rebooted.
+  * Mods only have access to volume and adding at certain positions compared to the extended access of admins.
   
 ======
 
