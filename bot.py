@@ -1,4 +1,4 @@
-version = "0.0.8a"
+version = "0.0.8b"
 
 # To-Do:
 # Extend property list at Video class (done?)
@@ -115,7 +115,9 @@ class MusicBot(discord.Client):
         
         self.player = None
         self.playerStartTime = None
+        self.playerPauseTime = None
         self.playerEndTime = None
+        self.playerRemaining = None
         self.playerVolume = 1.0
         self.playerForceStop = False
 
@@ -190,9 +192,9 @@ class MusicBot(discord.Client):
             self.textChannel.append(self.get_channel(channelId))
         self.voiceChannel = self.get_channel(self.voiceChannelId)
         self.logChannel = self.get_channel(self.logChannelId)
-        # Take server we got from first channel (this should be the main server)
-        if(len(self.textChannel) > 0):
-            self.server = self.textChannel[0].server
+        # Take server we got from the voicechannel (this should be the main server)
+        if(self.voiceChannel):
+            self.server = self.voiceChannel.server
             if(self.server.me.nick):
                 self.logger.info("Nickname \"{prefix}\" found".format(prefix=self.server.me.nick))
         else:
@@ -221,7 +223,10 @@ class MusicBot(discord.Client):
                         self.logger.exception("Youtube Data API returned 403 with the message: {message}".format(message=videoContent["error"]["message"]))
                         self.logger.debug("Falling back to defaults")
                         self.youtube = None
+                        songList.append(Video(user, song[0]))
+                        continue
                     else:
+                        # We got some other error code, let's retry again with other song(s)
                         continue
                 except:
                     pass
@@ -264,7 +269,6 @@ class MusicBot(discord.Client):
             
 
     async def on_message(self, message):
-        self.logger.info(message.content)
         # First check if it's us being tagged or correct prefix is being used
         if(self.flagUsePrefix == False):
             # Prevent issues, if this is smaller than 0 (wat?), we got a problem
@@ -344,7 +348,7 @@ class MusicBot(discord.Client):
                 queuePos = len(self.playlist)
             
             if(queuePos <= 0):
-                queuePos = 0
+                queuePos = 1
 
             self.logger.info("Adding song at pos {pos}".format(pos=queuePos+1))
 
@@ -402,7 +406,7 @@ class MusicBot(discord.Client):
             
             # Make the current song a "earlier" element in the list (current playing song "doesn't count")
             if(not self.player):
-                queuePos += 1
+                queuePos -= 1
             # Easy method to parse multiple songs in case, not efficient for 1 only though
             embed = discord.Embed()
             embed.set_author(name=self.user, icon_url=self.user.avatar_url, url=embed.Empty)
@@ -492,6 +496,10 @@ class MusicBot(discord.Client):
                     await self.change_presence(game=self.game)
                     self.player.start()
 
+                    self.playerStartTime = datetime.datetime.now()
+                    self.playerEndTime = datetime.datetime.now() + datetime.timedelta(seconds=self.playlist[0]._duration)
+                    self.logger.info("Estimated end time is {hour}:{minute}:{second}".format(hour=self.playerEndTime.hour, minute=self.playerEndTime.minute, second=self.playerEndTime.second))
+
                     embed = discord.Embed()
                     embed.set_author(name=self.playlist[0].user, icon_url=self.playlist[0].user.avatar_url, url=embed.Empty)
                     if self.playlist[0].user.id in self.embedColors.keys():
@@ -566,6 +574,10 @@ class MusicBot(discord.Client):
                     self.voteSkip = False
                     del self.playlist[0]
 
+                    self.playerStartTime = None
+                    self.playerPauseTime = None
+                    self.playerEndTime = None
+
                     songList = list()
                     for song in self.playlist:
                         songList.append([song.url, song.user.id])
@@ -589,6 +601,7 @@ class MusicBot(discord.Client):
                 return
 
             if(not self.youtube):
+                await self.send_message(message.channel, "Youtube API is disabled, please contact the host to enable this")
                 return
 
             content = content.replace("search ", "", 1)
@@ -669,13 +682,18 @@ class MusicBot(discord.Client):
                 await self.send_message(message.channel, "Player isn't active")
                 return
             self.player.pause()
+            self.playerPauseTime = datetime.datetime.now()
+            self.playerRemaining = self.playerEndTime - self.playerPauseTime
             embed = discord.Embed()
             embed.set_author(name=message.author, icon_url=message.author.avatar_url, url=embed.Empty)
             if message.author.id in self.embedColors.keys():
                 embed.color = self.embedColors[message.author.id]
             embed.title = embed.Empty
             embed.url = embed.Empty
-            embed.description = "Paused **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.playlist[0].title, url=self.playlist[0].url)
+            if(self.playlist[0].title):
+                embed.description = "Paused **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.playlist[0].title, url=self.playlist[0].url)
+            else:
+                embed.description = "Paused **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.player.title, url=self.player.url)
             await self.send_message(message.channel, embed=embed)
             if(self.playlist[0].title != None):
                 self.game = discord.Game(
@@ -694,13 +712,19 @@ class MusicBot(discord.Client):
                 await self.send_message(message.channel, "Player isn't active")
                 return
             self.player.resume()
+            if(self.playerEndTime):
+                self.playerEndTime += self.playerRemaining
+                self.playerRemaining = None
             embed = discord.Embed()
             embed.set_author(name=message.author, icon_url=message.author.avatar_url, url=embed.Empty)
             if message.author.id in self.embedColors.keys():
                 embed.color = self.embedColors[message.author.id]
             embed.title = embed.Empty
             embed.url = embed.Empty
-            embed.description = "Resumed **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.playlist[0].title, url=self.playlist[0].url)
+            if(self.playlist[0].title):
+                embed.description = "Resumed **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.playlist[0].title, url=self.playlist[0].url)
+            else:
+                embed.description = "Resumed **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.player.title, url=self.player.url)
             await self.send_message(message.channel, embed=embed)
             if(self.playlist[0].title != None):
                 self.game = discord.Game(
@@ -729,7 +753,10 @@ class MusicBot(discord.Client):
                 embed.color = self.embedColors[message.author.id]
             embed.title = embed.Empty
             embed.url = embed.Empty
-            embed.description = "Stopping player after **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.playlist[0].title, url=self.playlist[0].url)
+            if(self.playlist[0].title):
+                embed.description = "Stopping player after **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.playlist[0].title, url=self.playlist[0].url)
+            else:
+                embed.description = "Stopping player after **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.player.title, url=self.player.url)
             await self.send_message(message.channel, embed=embed)
 
         if content.startswith("clear"):
@@ -778,7 +805,7 @@ class MusicBot(discord.Client):
             voiceMembers = self.updateVoteState()
 
             embed = discord.Embed()
-            embed.set_author(name=message.author.id, icon_url=message.author.avatar_url, url=embed.Empty)
+            embed.set_author(name=message.author, icon_url=message.author.avatar_url, url=embed.Empty)
             if message.author.id in self.embedColors.keys():
                 embed.color = self.embedColors[message.author.id]
             embed.title = "**Voting**"
@@ -800,6 +827,9 @@ class MusicBot(discord.Client):
             if content.strip() == "volume":
                 self.logger.error("No arguments were passed after \"volume\", aborting")
                 await self.send_message(message.channel, formatErrorSyntax.format(format="```{prefix} volume <0-10>```".format(prefix=self.formatPrefix)))
+                return
+
+            if((message.author not in self.mods) or (message.author not in self.admins)):
                 return
 
             content = content.replace("volume ", "", 1)
@@ -841,8 +871,29 @@ class MusicBot(discord.Client):
                 await self.send_message(message.channel, formatErrorSyntax.format(format="```{prefix} timeleft```".format(prefix=self.formatPrefix)))
                 return
 
-            return
-            # Add more code
+            embed = discord.Embed()
+            embed.set_author(name=message.author, icon_url=message.author.avatar_url, url=embed.Empty)
+            if message.author.id in self.embedColors.keys():
+                embed.color = self.embedColors[message.author.id]
+            embed.title = embed.Empty
+            embed.url = embed.Empty
+            if self.playerRemaining:
+                if(self.playlist[0].title):
+                    embed.description = "{time} remaining for **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(time=":".join(str(self.playerRemaining).split('.')[:-1]), title=self.playlist[0].title, url=self.playlist[0].url)
+                else:
+                    embed.description = "{time} remaining for **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(time=":".join(str(self.playerRemaining).split('.')[:-1]), title=self.player.title, url=self.player.url)
+            elif(self.player):
+                if(self.playerEndTime):
+                    remaining = self.playerEndTime - datetime.datetime.now()
+                    if(self.playlist[0].title):
+                        embed.description = "{time} remaining for **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(time=":".join(str(remaining).split('.')[:-1]), title=self.playlist[0].title, url=self.playlist[0].url)
+                    else:
+                        embed.description = "{time} remaining for **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(time=":".join(str(remaining).split('.')[:-1]), title=self.player.title, url=self.player.url)
+            else:
+                embed.description = "Player isn't active"
+
+            await self.send_message(message.channel, embed=embed)
+
 
         if content.startswith("list"):
             if content.strip() != "list":
@@ -891,17 +942,33 @@ class MusicBot(discord.Client):
 
             songList = list()
             if(self.player):
-                embed.description = "Currently playing: **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.playlist[0].title, url=self.playlist[0].url)
+                if(self.playlist[0].title):
+                    embed.description = "Currently playing: **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.playlist[0].title, url=self.playlist[0].url)
+                else:
+                    embed.description = "Currently playing: **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=self.player.title, url=self.player.url)
                 songList = self.playlist[1:]
             else:
                 embed.description = embed.Empty
                 songList = self.playlist
 
+            totalTime = datetime.timedelta(hours=0, minutes=0, seconds=0)
+            for song in songList:
+                # Value shouldn't be None if we added it
+                if(song._duration):
+                    totalTime += datetime.timedelta(seconds=song._duration)
+
+            if(totalTime == datetime.timedelta(hours=0, minutes=0, seconds=0)):
+               totalTime = None
+
             indexNumber = 0
 
             if(len(songList) > 0):
-                embed.add_field(name="Playlist", value="**[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views \nPosition {pos} of {total}".format(title=songList[indexNumber].title, url=songList[indexNumber].url, duration=songList[indexNumber].duration, views=songList[indexNumber].views, pos=(indexNumber+1), total=len(songList)))
-                embed.set_footer(text="Added by {author}".format(author=songList[indexNumber].user.name), icon_url=songList[indexNumber].user.avatar_url)
+                if(self.playlist[indexNumber].title and self.playlist[indexNumber].duration and self.playlist[indexNumber].views):
+                    embed.add_field(name="Playlist", value="**[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views \nPosition {pos} of {total} \nAdded by {author}".format(title=songList[indexNumber].title, url=songList[indexNumber].url, duration=songList[indexNumber].duration, views=songList[indexNumber].views, pos=(indexNumber+1), total=len(songList), author=songList[indexNumber].user.name), icon_url=songList[indexNumber].user.avatar_url)
+                else:
+                    embed.add_field(name="Playlist", value="**[{url}](https://www.youtube.com/watch?v={url} '{url}')** \nPosition {pos} of {total} \nAdded by {author}".format(url=songList[indexNumber].url, pos=(indexNumber+1), total=len(songList), author=songList[indexNumber].user.name), icon_url=songList[indexNumber].user.avatar_url)
+                if(totalTime):
+                    embed.set_footer(text="Total playlist time: {time}".format(time=str(totalTime)))
             listMessage = await self.send_message(message.channel, embed=embed)
 
             if(len(songList) > 0):
@@ -926,7 +993,10 @@ class MusicBot(discord.Client):
                             indexNumber += 1
                             await self.clear_reactions(listMessage)
                     embed.clear_fields()
-                    embed.add_field(name="Playlist", value="**[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views \nPosition {pos} of {total}".format(title=songList[indexNumber].title, url=songList[indexNumber].url, duration=songList[indexNumber].duration, views=songList[indexNumber].views, pos=(indexNumber+1), total=len(songList)))
+                    if(self.playlist[indexNumber].title and self.playlist[indexNumber].duration and self.playlist[indexNumber].views):
+                        embed.add_field(name="Playlist", value="**[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views \nPosition {pos} of {total}".format(title=songList[indexNumber].title, url=songList[indexNumber].url, duration=songList[indexNumber].duration, views=songList[indexNumber].views, pos=(indexNumber+1), total=len(songList)))
+                    else:
+                        embed.add_field(name="Playlist", value="**[{url}](https://www.youtube.com/watch?v={url} '{url}')** \nPosition {pos} of {total}".format(url=songList[indexNumber].url, pos=(indexNumber+1), total=len(songList)))
                     embed.set_footer(text="Added by {author}".format(author=songList[indexNumber].user.name), icon_url=songList[indexNumber].user.avatar_url)
                     await self.edit_message(listMessage, embed=embed)
             else:
@@ -953,7 +1023,10 @@ class MusicBot(discord.Client):
             indexNumber = 0
 
             if(len(songList) > 0):
-                embed.description = "**[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views \nPosition {pos} of {total}".format(title=songList[indexNumber].title, url=songList[indexNumber].url, duration=songList[indexNumber].duration, views=songList[indexNumber].views, pos=(indexNumber+1), total=len(songList))
+                if(self.playlist[indexNumber].title and self.playlist[indexNumber].duration and self.playlist[indexNumber].views):
+                    embed.description = "**[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views \nPosition {pos} of {total}".format(title=songList[indexNumber].title, url=songList[indexNumber].url, duration=songList[indexNumber].duration, views=songList[indexNumber].views, pos=(indexNumber+1), total=len(songList))
+                else:
+                    embed.description = "**[{url}](https://www.youtube.com/watch?v={url} '{url}')** \nPosition {pos} of {total}".format(url=songList[indexNumber].url, pos=(indexNumber+1), total=len(songList))
                 embed.set_footer(text="Respond with \u274c to remove")
             else:
                 embed.description = "No songs were found"
@@ -984,7 +1057,10 @@ class MusicBot(discord.Client):
                         elif(result.reaction.emoji == "\u274c"):
                             self.playlist.remove(songList[indexNumber])
                             await self.clear_reactions(listMessage)
-                            embed.description = "Removed **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=songList[indexNumber].title, url=songList[indexNumber].url)
+                            if(songList[indexNumber].title):
+                                embed.description = "Removed **[{title}](https://www.youtube.com/watch?v={url} '{url}')**".format(title=songList[indexNumber].title, url=songList[indexNumber].url)
+                            else:
+                                embed.description = "Removed **[{url}](https://www.youtube.com/watch?v={url} '{url}')**".format(url=songList[indexNumber].url)
                             embed.set_footer(text=embed.Empty)
                             await self.send_message(message.channel, embed=embed)
                             for song in self.playlist:
@@ -1087,19 +1163,19 @@ class MusicBot(discord.Client):
             else:
                 return True
 
-    async def on_server_join(self, server):
-        if(self.textChannel == None):
+    #async def on_server_join(self, server):
+        #if(self.textChannel == None):
             #await self.send_message(server.owner, "<text about configuring music channel>")
-            flagPass = False
-            while(flagPass == False):
-                message = await self.wait_for_message(timeout=180.0, author=server.owner)
-                if not message:
-                    continue
-                if(len(message.raw_channel_mentions) >= 1):
-                    channel = server.get_channel(message.raw_channel_mentions[0])
-                    if channel.type == discord.ChannelType.text:
-                        self.textChannel = channel
-                        break
+            #flagPass = False
+            #while(flagPass == False):
+                #message = await self.wait_for_message(timeout=180.0, author=server.owner)
+                #if not message:
+                    #continue
+                #if(len(message.raw_channel_mentions) >= 1):
+                    #channel = server.get_channel(message.raw_channel_mentions[0])
+                    #if channel.type == discord.ChannelType.text:
+                        #self.textChannel = channel
+                        #break
             
 
     def run(self):
