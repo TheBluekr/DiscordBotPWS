@@ -16,7 +16,7 @@ Music bot written in Python for [DiscordApp](https://discordapp.com/). So far on
     * youtube-dl (requirement for discord.py) (Python)
     * ffmpeg
   * The bot should create the folders and files on first boot and exit due to invalid login credentials. The credentials can be configured at "/settings/config.cfg" at "Auth". Put a bot key at "token" or an email and password of an account at the corresponding variables. The bot will take a bot token unless the "usetoken" is set to false.
-  * Make sure the bot is connected to the server before starting fully
+  * Make sure the bot (account) is added to the server before starting fully
   * The voicechannel can be configured at the config under "Administration" by using the id of the voicechannel (bot will take first by    default if there're more than 1).
   * The textchannel can be configured the same way as the voicechannel. Multiple textchannels can be configured by splitting them using ',' without spaces between the id's.
   * The Google API key can be retrieved from [here](https://console.developers.google.com/apis/library) at the section "YouTube Data API". This should enable adding of playlists and more features. (Requires a Google account)
