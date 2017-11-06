@@ -40,15 +40,20 @@ Music bot written in Python for [DiscordApp](https://discordapp.com/). So far on
   * `<prefix> add <video id>`
   * `<prefix> add <full url with "&list=">` (requires Google API)
   * `<prefix> play`
-  * `<prefix> search <content>` (add by reacting to a number) (requires Google API)
-  * `<prefix> volume <0-10>` (also accepting decimals with a .) (mod/admin only)
-  * `<prefix> pause` (mod/admin only (soon(tm)))
-  * `<prefix> resume` (mod/admin only (soon(tm)))
+  * `<prefix> search <content>` (requires Google API)
   * `<prefix> timeleft`
   * `<prefix> skip` (will trigger a vote if active)
   * `<prefix> shuffle` (will trigger a vote if active)
   * `<prefix> remove` (able to remove added songs of your own)
   * `<prefix> list` (requires Google API for full support)
-  * `<prefix> eval <object>` (admin only)
+  
+     #### Mod and admin:
+     * `<prefix> volume <0-10>` (also accepting decimals with a `.` and not a `,`)
+     * `<prefix> pause`
+     * `<prefix> resume`
+     ##### Notes:
+     * `add` command supports also a `<pos>` parameter after id
+     * `remove` command shows all users songs when using as admin
+     * `<prefix> eval <object>` is only available for admins
 
 Gemaakt als opdracht voor Het Amsterdams Lyceum als Profiel Werkstuk.
