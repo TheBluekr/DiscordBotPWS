@@ -1,5 +1,5 @@
 # DiscordBotPWS
-### Latest build v0.0.8b
+### Latest build v0.0.9a
 
 Music bot written in Python for [DiscordApp](https://discordapp.com/). So far only supports Youtube videos or playlists (if Google API key is registered).
 
