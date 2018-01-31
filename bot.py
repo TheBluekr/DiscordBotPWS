@@ -1,4 +1,4 @@
-version = "0.0.8b"
+version = "0.0.9a"
 
 # To-Do:
 # Extend property list at Video class (done?)
@@ -51,7 +51,7 @@ fileHandler.setLevel(logging.DEBUG)
 rootLogger.addHandler(fileHandler)
 
 discordLogger = logging.getLogger('discord')
-discordLogger.setLevel(logging.WARNING)
+discordLogger.setLevel(logging.DEBUG)
 
 class MusicBot(discord.Client):
     # Init discord.Client() from discord.py
@@ -78,7 +78,8 @@ class MusicBot(discord.Client):
         try:
             with open(self.fPlaylist, "r") as file:
                 self.playlist = json.load(file)
-        except(ValueError, FileNotFoundError):
+        except(json.JSONDecodeError, FileNotFoundError):
+            self.logger.error("Failed to parse playlist.json, cleaning file")
             # Either file has a mistake in indentations, has been corrupted or didn't exist. Let's create a new one later
             with open(self.fPlaylist, "w") as file:
                 json.dump(list(), file)
@@ -199,7 +200,13 @@ class MusicBot(discord.Client):
                 self.logger.info("Nickname \"{prefix}\" found".format(prefix=self.server.me.nick))
         else:
             self.logger.debug("Failed to retrieve main server, channel isn't defined in config")
-            self.server = list(self.servers)[0]
+            try:
+                self.server = list(self.servers)[0]
+            except IndexError:
+                self.logger.error("Currently can't find a server. Are you sure the bot has been added?")
+                with open("invite.json", "w") as file:
+                    json.dump("https://discordapp.com/api/oauth2/authorize?client_id={id}&scope=bot".format(id=self.user.id), file)
+                self.logger.info("Use the following code to invite: \nhttps://discordapp.com/api/oauth2/authorize?client_id={id}&scope=bot".format(id=self.user.id))
             if(self.server.me.nick):
                 self.logger.info("Nickname \"{prefix}\" found".format(prefix=self.server.me.nick))
 
@@ -261,12 +268,17 @@ class MusicBot(discord.Client):
         print(" "*textLength, end="\r")
         self.logger.info("Done loading")
         self.voiceClient = await self.join_voice_channel(self.voiceChannel)
+        if not self.voiceClient:
+            self.logger.error("Failed to find voice channel, is the id configured right?")
         if(len(self.admins) == 0):
-            self.admins.append(self.server.owner)
-            application = await self.application_info()
-            if(self.server.owner != application.owner):
+            if(self.server):
+                self.admins.append(self.server.owner)
+                application = await self.application_info()
+                if(self.server.owner != application.owner):
+                    self.admins.append(application.owner)
+            else:
+                application = await self.application_info()
                 self.admins.append(application.owner)
-            
 
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
@@ -312,8 +324,40 @@ class MusicBot(discord.Client):
             return
             # In case we only mention the bot or use a prefix it can create exceptions
 
-        # We want to make sure there's something after the add, it can't be empty right?
+        if content.startswith("help"):
+            if content.strip() != "help":
+                # Add more
+                return
+
+            embed = discord.Embed()
+            embed.set_author(name=self.user, icon_url=self.user.avatar_url, url=embed.Empty)
+            if self.user.id in self.embedColors.keys():
+                embed.color = self.embedColors[self.user.id]
+            embed.title = "List of commands:"
+            embed.url = embed.Empty
+            embed.description = embed.Empty
+            if(self.prefix == None):
+                self.prefix = self.user
+            embed.add_field(name="help", value="Returns list of commands with description and usage. Usage:\n```{prefix} help```".format(prefix=self.prefix))
+            embed.add_field(name="add", value="Adds an URL to the playlist. Usage:\n```{prefix} add <youtube video/list id>```".format(prefix=self.prefix))
+            embed.add_field(name="play", value="Queues all songs from the playlist. Usage:\n```{prefix} play```".format(prefix=self.prefix))
+            embed.add_field(name="search", value="Displays a list of songs returned by Youtube (requires API). Usage:\n```{prefix} search <query>```".format(prefix=self.prefix))
+            embed.add_field(name="pause", value="Pauses a currently playing song. Usage:\n```{prefix} pause```".format(prefix=self.prefix))
+            embed.add_field(name="resume", value="Resumes playing the current song. Usage:\n```{prefix} resume```".format(prefix=self.prefix))
+            embed.add_field(name="stop", value="Stops playing after current song ends (Administrator only). Usage:\n```{prefix} stop```".format(prefix=self.prefix))
+            embed.add_field(name="skip", value="Initiates a vote to skip the currently playing song.\nRequires {int}% of the listening people to vote\nUsage:\n```{prefix} skip```".format(int=int(self.votePercentage*100), prefix=self.prefix))
+            embed.add_field(name="shuffle", value="Initiates a vote to shuffle the complete playlist.\nRequires {int}% of the listening people to vote\nUsage:\n```{prefix} shuffle```".format(int=int(self.votePercentage*100), prefix=self.prefix))
+            embed.add_field(name="volume", value="Sets the volume for the player (Administrator only). Usage:\n```{prefix} volume <0-10>```".format(prefix=self.prefix))
+            embed.add_field(name="timeleft", value="Returns how much time is left for current song. Usage:\n```{prefix} timeleft```".format(prefix=self.prefix))
+            embed.add_field(name="list", value="Returns a list of all songs in the playlist (requires API). Usage:\n```{prefix} list```".format(prefix=self.prefix))
+            embed.add_field(name="remove", value="Returns a list with all own songs in the playlist available to remove (requires API). Usage:\n```{prefix} remove``` \nNote:\nAdministrators can see all songs.".format(prefix=self.prefix))
+            embed.add_field(name="eval", value="Returns value of a object. Usage:\n```{prefix} value <object>```".format(prefix=self.prefix))
+            embed.add_field(name="exit", value="Shuts the bot down (Administrator only). Usage:\n```{prefix} exit```".format(prefix=self.prefix))
+
+            await self.send_message(message.channel, embed=embed)
+        
         if content.startswith("add"):
+            # We want to make sure there's something after the add, it can't be empty right?
             if content.strip() == "add":
                 self.logger.error("{user} ({id}: No arguments were passed after \"add\", aborting".format(user=message.author.name, id=message.author.id))
                 await self.send_message(message.channel, formatErrorSyntax.format(format="```{prefix} add <url / id>```".format(prefix=self.formatPrefix)))
@@ -350,7 +394,7 @@ class MusicBot(discord.Client):
             if(queuePos <= 0):
                 queuePos = 1
 
-            self.logger.info("Adding song at pos {pos}".format(pos=queuePos+1))
+            self.logger.info("Adding song at pos {pos}".format(pos=queuePos))
 
             songList = list()
             
@@ -418,6 +462,8 @@ class MusicBot(discord.Client):
             
             for queuePos, song in enumerate(songList, start=queuePos):
                 self.playlist.insert(queuePos+songList.index(song), song)
+                if(not self.player):
+                    queuePos += 1
                 if(len(songList) == 1):
                     if(song.title):
                         messageDescription.append("Added **[{title}](https://www.youtube.com/watch?v={url} '{url}')** at position {pos}".format(title=song.title, url=song.url, pos=queuePos))
@@ -467,7 +513,7 @@ class MusicBot(discord.Client):
                     self.voteSkip = False
                     self.voteShuffle = False
                     try:
-                        self.player = await self.voiceClient.create_ytdl_player(self.playlist[0].url)
+                        self.player = await self.voiceClient.create_ytdl_player(url=self.playlist[0].url, before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5")
                     except(youtube_dl.utils.GeoRestrictedError, youtube_dl.utils.DownloadError):
                         self.logger.error("Youtube-dl failed to download from \"{url}\"".format(url=self.playlist[0].url))
                         del self.playlist[0]
@@ -681,6 +727,10 @@ class MusicBot(discord.Client):
             if not self.player:
                 await self.send_message(message.channel, "Player isn't active")
                 return
+
+            if((message.author not in self.mods) or (message.author not in self.admins)):
+                return
+
             self.player.pause()
             self.playerPauseTime = datetime.datetime.now()
             self.playerRemaining = self.playerEndTime - self.playerPauseTime
@@ -711,6 +761,10 @@ class MusicBot(discord.Client):
             if not self.player:
                 await self.send_message(message.channel, "Player isn't active")
                 return
+
+            if((message.author not in self.mods) or (message.author not in self.admins)):
+                return
+
             self.player.resume()
             if(self.playerEndTime):
                 self.playerEndTime += self.playerRemaining
@@ -829,7 +883,7 @@ class MusicBot(discord.Client):
                 await self.send_message(message.channel, formatErrorSyntax.format(format="```{prefix} volume <0-10>```".format(prefix=self.formatPrefix)))
                 return
 
-            if((message.author not in self.mods) or (message.author not in self.admins)):
+            if((message.author not in self.mods) and (message.author not in self.admins)):
                 return
 
             content = content.replace("volume ", "", 1)
@@ -964,9 +1018,9 @@ class MusicBot(discord.Client):
 
             if(len(songList) > 0):
                 if(self.playlist[indexNumber].title and self.playlist[indexNumber].duration and self.playlist[indexNumber].views):
-                    embed.add_field(name="Playlist", value="**[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views \nPosition {pos} of {total} \nAdded by {author}".format(title=songList[indexNumber].title, url=songList[indexNumber].url, duration=songList[indexNumber].duration, views=songList[indexNumber].views, pos=(indexNumber+1), total=len(songList), author=songList[indexNumber].user.name), icon_url=songList[indexNumber].user.avatar_url)
+                    embed.add_field(name="Playlist", value="**[{title}](https://www.youtube.com/watch?v={url} '{url}')** \nDuration: {duration} \n{views} views \nPosition {pos} of {total} \nAdded by {author}".format(title=songList[indexNumber].title, url=songList[indexNumber].url, duration=songList[indexNumber].duration, views=songList[indexNumber].views, pos=(indexNumber+1), total=len(songList), author=songList[indexNumber].user.name))#, icon_url=songList[indexNumber].user.avatar_url)
                 else:
-                    embed.add_field(name="Playlist", value="**[{url}](https://www.youtube.com/watch?v={url} '{url}')** \nPosition {pos} of {total} \nAdded by {author}".format(url=songList[indexNumber].url, pos=(indexNumber+1), total=len(songList), author=songList[indexNumber].user.name), icon_url=songList[indexNumber].user.avatar_url)
+                    embed.add_field(name="Playlist", value="**[{url}](https://www.youtube.com/watch?v={url} '{url}')** \nPosition {pos} of {total} \nAdded by {author}".format(url=songList[indexNumber].url, pos=(indexNumber+1), total=len(songList), author=songList[indexNumber].user.name))#, icon_url=songList[indexNumber].user.avatar_url)
                 if(totalTime):
                     embed.set_footer(text="Total playlist time: {time}".format(time=str(totalTime)))
             listMessage = await self.send_message(message.channel, embed=embed)
@@ -1017,8 +1071,12 @@ class MusicBot(discord.Client):
                     if((self.player) and (song == self.playlist[0])):
                         continue
                     songList.append(song)
+                elif(message.author in self.admins):
+                    if((self.player) and (song == self.playlist[0])):
+                        continue
+                    songList.append(song)
 
-            self.logger.info("Found {number} songs of {author}".format(number=len(songList), author=message.author))
+            self.logger.info("Found {number} songs".format(number=len(songList), author=message.author))
 
             indexNumber = 0
 
@@ -1063,6 +1121,7 @@ class MusicBot(discord.Client):
                                 embed.description = "Removed **[{url}](https://www.youtube.com/watch?v={url} '{url}')**".format(url=songList[indexNumber].url)
                             embed.set_footer(text=embed.Empty)
                             await self.send_message(message.channel, embed=embed)
+                            songList = list()
                             for song in self.playlist:
                                 songList.append([song.url, song.user.id])
                             with open(self.fPlaylist, "w", encoding="utf-8") as file:
@@ -1407,12 +1466,12 @@ class Config:
             self.usePrefix = False
         if not self.usePrefix:
             self.logger.info("Prefix usage is set to false")
-            self.logger.info("Configuring bot mention as prefix on login")
+            self.logger.info("Configuring default mention as prefix on login")
         else:
             self.logger.info("Prefix usage is set to true")
             self.logger.info("Loading prefix")
             if not self.prefix:
-                self.logger.warning("Prefix isn't configured, configuring bot mention as prefix on login")
+                self.logger.error("Prefix isn't configured, configuring default mention as prefix on login")
                 self.usePrefix = False
             else:
                 self.logger.info("Prefix set to \"{prefix}\"".format(prefix=self.prefix))
