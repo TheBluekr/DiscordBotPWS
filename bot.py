@@ -1,4 +1,4 @@
-version = "0.0.9a"
+version = "0.0.10a"
 
 # To-Do:
 # Extend property list at Video class (done?)
@@ -14,6 +14,7 @@ import asyncio
 import discord
 import logging
 import os
+import pwd
 import configparser
 import datetime
 import urllib.parse
@@ -26,7 +27,6 @@ import math
 import re
 import sys
 import youtube_dl
-
 
 # Declare global vars
 
@@ -71,6 +71,7 @@ class MusicBot(discord.Client):
         self.fPlaylist = os.path.join("./settings", "playlist.json")
 
         self.version = version
+        self.webserver = None
 
         self.config = Config(self.fConfig)
         
@@ -279,6 +280,11 @@ class MusicBot(discord.Client):
             else:
                 application = await self.application_info()
                 self.admins.append(application.owner)
+        
+        ip = "127.0.0.1"
+        port = 8888
+        self.logger.info("Starting websocket on {0}:{1}".format(ip, port))
+        self.webserver = await asyncio.start_server(self.handle_server, ip, port, loop=self.loop)
 
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
@@ -1153,6 +1159,8 @@ class MusicBot(discord.Client):
 
         if(content.startswith("exit") or content.startswith("shutdown")):
             self.logger.info("Shutting down")
+            self.webserver.close()
+            self.loop.run_until_complete(self.webserver.wait_closed())
             await self.logout()
 
     async def on_voice_state_update(self, memberBefore, memberAfter):
@@ -1221,6 +1229,18 @@ class MusicBot(discord.Client):
                     return False
             else:
                 return True
+    
+    async def handle_server(self, reader, writer):
+        self.logger.info("Received web request")
+        # Handle outgoing message using writer
+        voiceOutput = []
+        if(self.is_voice_connected(self.server) and self.voiceChannel):
+            for member in self.voiceChannel.voice_members:
+                voiceOutput.append(str(member))
+        data = json.dumps({"version":self.version, "user":str(self.user), "isLoggedIn":self.is_logged_in, "server":self.server.name, "voiceChannel":self.voiceChannel.name, "voiceMembers":voiceOutput})
+        writer.write(data.encode())
+        self.logger.info("Sending data {}".format(data))
+        writer.close()
 
     #async def on_server_join(self, server):
         #if(self.textChannel == None):
