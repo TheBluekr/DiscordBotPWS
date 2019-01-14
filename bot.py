@@ -14,7 +14,6 @@ import asyncio
 import discord
 import logging
 import os
-import pwd
 import configparser
 import datetime
 import urllib.parse
@@ -72,6 +71,7 @@ class MusicBot(discord.Client):
 
         self.version = version
         self.webserver = None
+        self.connections = {}
 
         self.config = Config(self.fConfig)
         
@@ -257,6 +257,7 @@ class MusicBot(discord.Client):
             # Update this to current playlist
             self.playlist = songList
 
+        print("\n")
         # We defined the discord.Game() class at the begin as self.game
         if(self.game.url and (self.game.type == 1)):
             self.logger.info("Started streaming {name}".format(name=self.game.name))
@@ -281,10 +282,10 @@ class MusicBot(discord.Client):
                 application = await self.application_info()
                 self.admins.append(application.owner)
         
-        ip = "127.0.0.1"
-        port = 8888
+        ip = "192.168.1.44"
+        port = 27005
         self.logger.info("Starting websocket on {0}:{1}".format(ip, port))
-        self.webserver = await asyncio.start_server(self.handle_server, ip, port, loop=self.loop)
+        self.webserver = await asyncio.start_server(self.accept_connection, ip, port, loop=self.loop)
 
     async def on_message(self, message):
         # First check if it's us being tagged or correct prefix is being used
@@ -1160,8 +1161,18 @@ class MusicBot(discord.Client):
         if(content.startswith("exit") or content.startswith("shutdown")):
             self.logger.info("Shutting down")
             self.webserver.close()
-            self.loop.run_until_complete(self.webserver.wait_closed())
+            await self.webserver.wait_closed()
             await self.logout()
+        
+        if(content.startswith("reboot") or content.startswith("restart")):
+            self.logger.info("Received restart request")
+            self.logger.info("Logging out")
+            await self.logout()
+            await asyncio.sleep(2)
+            self.logger.info("Re-initializing bot...")
+            self.__init__()
+            self.logger.info("Logging in again...")
+            self.run()
 
     async def on_voice_state_update(self, memberBefore, memberAfter):
         # Don't process if we don't got a voicechannel
@@ -1229,18 +1240,49 @@ class MusicBot(discord.Client):
                     return False
             else:
                 return True
-    
-    async def handle_server(self, reader, writer):
-        self.logger.info("Received web request")
+
+    def broadcast(self, info):
         # Handle outgoing message using writer
         voiceOutput = []
         if(self.is_voice_connected(self.server) and self.voiceChannel):
             for member in self.voiceChannel.voice_members:
                 voiceOutput.append(str(member))
-        data = json.dumps({"version":self.version, "user":str(self.user), "isLoggedIn":self.is_logged_in, "server":self.server.name, "voiceChannel":self.voiceChannel.name, "voiceMembers":voiceOutput})
+        playlist = []
+        for song in self.playlist:
+            playlist.append([song.title, song.url, song.user.name])
+        data = json.dumps({"version":self.version, "user":str(self.user), "isLoggedIn":self.is_logged_in, "server":self.server.name, "voiceChannel":self.voiceChannel.name, "voiceMembers":voiceOutput, "songs":playlist})
         writer.write(data.encode())
         self.logger.info("Sending data {}".format(data))
-        writer.close()
+        for reader, writer in self.connections.values():
+            writer.write(info)
+
+    async def find_index(self, reader, writer):
+        while True:
+            for i in range(1, 100): # 100 connections max
+                if(i not in self.connections):
+                    return i
+            writer.write("Socket is full")
+
+    async def handle_connection(self, index, reader):
+        while True:
+            data = (await reader.read()).decode("utf-8", "replace")
+            if not data:
+                self.logger.info("No data received")
+                del self.connections[index]
+                return None
+    
+    async def accept_connection(self, reader, writer):
+        self.logger.info("Starting socket connection")
+        index = (await self.find_index(reader, writer))
+        if(index and index not in self.connections):
+            self.logger.info("Received index {} for client".format(index))
+            self.connections[index] = (reader, writer)
+            writer.write(b"TheBluekr:BotWebPanel\n")
+            await self.handle_connection(index, reader)
+        else:
+            self.logger.info("Couldn't get valid index")
+        self.logger.info("Closing socket connection")
+        await writer.drain()
 
     #async def on_server_join(self, server):
         #if(self.textChannel == None):
